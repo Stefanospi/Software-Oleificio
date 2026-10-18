@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── HELPER FUNCTIONS ──────────────────────────────────────────────────────
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() == 'admin';
+    }
+
+    function isDipendente() {
+      return isAuthenticated() && getUserRole() == 'dipendente';
+    }
+
+    function isAdminOrDipendente() {
+      return isAdmin() || isDipendente();
+    }
+
+    // ─── PROFILI UTENTE ─────────────────────────────────────────────────────────
+    // Admin: accesso completo
+    // Dipendente: può leggere e aggiornare solo il proprio profilo
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isAdmin() || request.auth.uid == userId);
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']));
+      allow delete: if isAdmin();
+    }
+
+    // ─── CLIENTI ────────────────────────────────────────────────────────────────
+    // Admin: accesso completo (inclusi dati fiscali, note, dichiarazione)
+    // Dipendente: può leggere anagrafica base e creare nuovi clienti
+    match /customers/{customerId} {
+      allow read: if isAdminOrDipendente();
+      allow create: if isAdminOrDipendente();
+      allow update: if isAdminOrDipendente();
+      allow delete: if isAdmin();
+    }
+
+    // ─── PARTITE ────────────────────────────────────────────────────────────────
+    // Entrambi: lettura e creazione
+    // Solo Admin: eliminazione
+    match /batches/{batchId} {
+      allow read: if isAdminOrDipendente();
+      allow create: if isAdminOrDipendente();
+      allow update: if isAdminOrDipendente();
+      allow delete: if isAdmin();
+    }
+
+    // ─── PESATE ─────────────────────────────────────────────────────────────────
+    match /weighings/{weighingId} {
+      allow read: if isAdminOrDipendente();
+      allow create: if isAdminOrDipendente();
+      allow update: if isAdminOrDipendente();
+      allow delete: if isAdmin();
+    }
+
+    // ─── MOLITURA ───────────────────────────────────────────────────────────────
+    match /millings/{millingId} {
+      allow read: if isAdminOrDipendente();
+      allow create: if isAdminOrDipendente();
+      allow update: if isAdminOrDipendente();
+      allow delete: if isAdmin();
+    }
+
+    // ─── BINS ───────────────────────────────────────────────────────────────────
+    match /bins/{binId} {
+      allow read: if isAdminOrDipendente();
+      allow create: if isAdmin();
+      allow update: if isAdminOrDipendente();
+      allow delete: if isAdmin();
+    }
+
+    // ─── CONTENITORI OLIO ───────────────────────────────────────────────────────
+    match /containers/{containerId} {
+      allow read: if isAdminOrDipendente();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── PAGAMENTI (SOLO ADMIN) ─────────────────────────────────────────────────
+    // Dati finanziari: visibili e modificabili solo dall'Admin
+    match /payments/{paymentId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── AGENDA ─────────────────────────────────────────────────────────────────
+    // Admin: accesso completo
+    // Dipendente: sola lettura
+    match /appointments/{appointmentId} {
+      allow read: if isAdminOrDipendente();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ─── NOTIFICHE ──────────────────────────────────────────────────────────────
+    // Admin: accesso completo (lettura + mark-as-read)
+    // Dipendente: può solo creare notifiche (trigger da azioni operative)
+    match /notifications/{notificationId} {
+      allow read: if isAdmin();
+      allow create: if isAdminOrDipendente();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}
