@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
+import { logout } from "@/lib/authService";
 import type { UserRole } from "@/types";
 
 interface ProtectedRouteProps {
@@ -59,6 +60,40 @@ export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) 
 
   // Non autenticato: non renderizzare nulla (il redirect è in corso)
   if (!user) return null;
+
+  // Account autenticato ma senza profilo abilitato dall'admin
+  if (!role) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          alignItems: "center",
+          gap: 16,
+          height: "100vh",
+          padding: 24,
+          textAlign: "center",
+          backgroundColor: "var(--bg-app)",
+          color: "var(--text-primary)",
+        }}
+      >
+        <h2 style={{ fontSize: 20, fontWeight: 700 }}>Account non abilitato</h2>
+        <p style={{ fontSize: 14, maxWidth: 380, color: "var(--text-muted)" }}>
+          Il tuo account non ha un profilo valido. Contatta l&apos;amministratore per essere abilitato.
+        </p>
+        <button
+          className="btn-primary"
+          onClick={async () => {
+            await logout();
+            router.replace("/login");
+          }}
+        >
+          Esci
+        </button>
+      </div>
+    );
+  }
   if (requiredRole && role !== requiredRole) return null;
 
   return <>{children}</>;

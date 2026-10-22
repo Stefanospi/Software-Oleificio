@@ -7,36 +7,32 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Un utente autenticato senza profilo valido in /users NON ha alcun accesso
     function hasUserDoc() {
       return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
     function getUserRole() {
-      return hasUserDoc() ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : 'dipendente';
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
 
     function isAdmin() {
-      return isAuthenticated() && getUserRole() == 'admin';
-    }
-
-    function isDipendente() {
-      return isAuthenticated() && getUserRole() == 'dipendente';
+      return hasUserDoc() && getUserRole() == 'admin';
     }
 
     function isAdminOrDipendente() {
-      return isAuthenticated();
+      return hasUserDoc() && getUserRole() in ['admin', 'dipendente'];
     }
 
     // ─── PROFILI UTENTE ─────────────────────────────────────────────────────────
+    // I profili vengono creati/modificati solo dall'admin.
+    // Ogni utente può leggere il proprio profilo e aggiornare solo lastLogin.
     match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && (
-        isAdmin() ||
-        (request.auth.uid == userId && request.resource.data.role == 'dipendente')
-      );
-      allow update: if isAuthenticated() && (
-        isAdmin() ||
-        (request.auth.uid == userId && (!('role' in request.resource.data) || request.resource.data.role == resource.data.role))
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAdmin() && request.resource.data.role in ['admin', 'dipendente'];
+      allow update: if isAdmin() || (
+        request.auth.uid == userId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastLogin'])
       );
       allow delete: if isAdmin();
     }
@@ -117,7 +113,7 @@ service cloud.firestore {
     // Creazione aperta a tutti gli utenti per i trigger operativi
     // Solo Admin può cancellare le notifiche
     match /notifications/{notificationId} {
-      allow read, create, update: if isAuthenticated();
+      allow read, create, update: if isAdminOrDipendente();
       allow delete: if isAdmin();
     }
   }

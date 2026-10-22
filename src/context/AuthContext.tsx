@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import type { User } from "firebase/auth";
-import { onAuthChange, getUserProfile, createUserProfile, touchLastLogin } from "@/lib/authService";
+import { onAuthChange, getUserProfile, touchLastLogin } from "@/lib/authService";
 import type { UserProfile, UserRole } from "@/types";
 
 // ─── TIPO CONTEXT ──────────────────────────────────────────────────────────────
@@ -56,31 +56,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
             if (lastErr) throw lastErr;
 
-            if (!userProfile) {
-              // Profilo davvero assente su Firestore: crealo con ruolo dipendente (minimo privilegio)
-              const defaultRole: UserRole = "dipendente";
-              const displayName =
-                firebaseUser.displayName ||
-                firebaseUser.email?.split("@")[0] ||
-                "Utente";
-
-              await createUserProfile(
-                firebaseUser.uid,
-                firebaseUser.email || "",
-                displayName,
-                defaultRole
-              );
-
-              userProfile = {
-                uid: firebaseUser.uid,
-                email: firebaseUser.email || "",
-                displayName,
-                role: defaultRole,
-              };
+            // Nessun profilo valido = account non abilitato (i profili li crea solo l'admin)
+            if (!userProfile || (userProfile.role !== "admin" && userProfile.role !== "dipendente")) {
+              userProfile = null;
             }
             setProfile(userProfile);
             setUser(firebaseUser);
-            touchLastLogin(firebaseUser.uid);
+            if (userProfile) touchLastLogin(firebaseUser.uid);
           } catch (profileErr) {
             // Non assegnare mai un ruolo fittizio: un admin verrebbe degradato a dipendente
             console.error("Errore lettura profilo utente:", profileErr);
