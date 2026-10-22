@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "firebase:hosting":"firebase deploy --only hosting",
+    "firebase:rules":"firebase deploy --only firestore:rules"
   },
   "dependencies": {
     "firebase": "^12.19.0",

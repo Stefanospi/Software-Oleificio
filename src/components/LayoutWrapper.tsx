@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { type ReactNode } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { NotificationToast } from "@/components/NotificationToast";
 import type { UserRole } from "@/types";
 
 // Rotte pubbliche: nessuna autenticazione richiesta
@@ -27,17 +28,12 @@ export function LayoutWrapper({ children }: { children: ReactNode }) {
 
   return (
     <ProtectedRoute requiredRole={requiredRole}>
-      <div
-        className="layout-wrapper"
-        style={{ display: "flex", height: "100%", width: "100%" }}
-      >
+      <div className="layout-wrapper">
         <Sidebar />
-        <main
-          className="main-content"
-          style={{ flex: 1, overflowY: "auto", padding: "32px 36px" }}
-        >
+        <main className="main-content">
           {children}
         </main>
+        <NotificationToast />
       </div>
     </ProtectedRoute>
   );

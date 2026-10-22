@@ -45,7 +45,7 @@ export const getAllNotifications = async (limitN = 50): Promise<Notification[]> 
     .slice(0, limitN);
 };
 
-// ─── REAL-TIME LISTENER (per campanella Admin PC) ─────────────────────────────
+// ─── REAL-TIME LISTENER (per campanella) ───────────────────────────────────────
 export const subscribeToUnreadNotifications = (
   callback: (notifications: Notification[]) => void
 ): Unsubscribe => {
@@ -53,24 +53,63 @@ export const subscribeToUnreadNotifications = (
     collection(db, COL),
     where("isRead", "==", false)
   );
-  return onSnapshot(q, (snap) => {
-    const notifications = snap.docs.map(
-      (d) => ({ id: d.id, ...d.data() } as Notification)
-    ).sort((a, b) => {
-      const timeA = (a.createdAt as any)?.toMillis?.() ?? (a.createdAt ? new Date(a.createdAt as any).getTime() : 0);
-      const timeB = (b.createdAt as any)?.toMillis?.() ?? (b.createdAt ? new Date(b.createdAt as any).getTime() : 0);
-      return timeB - timeA;
-    });
-    callback(notifications);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      const notifications = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as Notification))
+        .sort((a, b) => {
+          const timeA = (a.createdAt as any)?.toMillis?.() ?? (a.createdAt ? new Date(a.createdAt as any).getTime() : Date.now());
+          const timeB = (b.createdAt as any)?.toMillis?.() ?? (b.createdAt ? new Date(b.createdAt as any).getTime() : Date.now());
+          return timeB - timeA;
+        });
+      callback(notifications);
+    },
+    (err) => {
+      console.warn("Avviso listener notifiche non lette:", err);
+    }
+  );
 };
 
-// ─── CREAZIONE (chiamata dai dipendenti mobile/pc dopo ogni azione) ────────────
+// ─── REAL-TIME LISTENER COMPLETO (per pagina /notifiche) ─────────────────────
+export const subscribeToAllNotifications = (
+  callback: (notifications: Notification[]) => void,
+  limitN = 100
+): Unsubscribe => {
+  const q = collection(db, COL);
+  return onSnapshot(
+    q,
+    (snap) => {
+      const notifications = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as Notification))
+        .sort((a, b) => {
+          const timeA = (a.createdAt as any)?.toMillis?.() ?? (a.createdAt ? new Date(a.createdAt as any).getTime() : Date.now());
+          const timeB = (b.createdAt as any)?.toMillis?.() ?? (b.createdAt ? new Date(b.createdAt as any).getTime() : Date.now());
+          return timeB - timeA;
+        })
+        .slice(0, limitN);
+      callback(notifications);
+    },
+    (err) => {
+      console.warn("Avviso listener tutte le notifiche:", err);
+    }
+  );
+};
+
+// ─── CREAZIONE (chiamata dopo ogni azione) ─────────────────────────────────────
 export const addNotification = async (
   notification: Omit<Notification, "id" | "createdAt" | "isRead" | "readAt">
 ): Promise<string> => {
+  // Rimuove chiavi con valore undefined per non far fallire Firestore SDK
+  const cleanData: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(notification)) {
+    if (value !== undefined) {
+      cleanData[key] = value;
+    }
+  }
+
   const docRef = await addDoc(collection(db, COL), {
-    ...notification,
+    ...cleanData,
     isRead: false,
     createdAt: serverTimestamp(),
   });
@@ -135,13 +174,16 @@ export const buildNotification = (
     },
   };
 
-  return {
+  const payload: Omit<Notification, "id" | "createdAt" | "isRead" | "readAt"> = {
     type,
     ...messages[type],
     createdBy,
     createdByName,
-    customerId,
-    batchId,
-    weighingId,
   };
+
+  if (customerId) payload.customerId = customerId;
+  if (batchId) payload.batchId = batchId;
+  if (weighingId) payload.weighingId = weighingId;
+
+  return payload;
 };

@@ -1,16 +1,21 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { loginWithEmail } from "@/lib/authService";
 import { Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [mounted, setMounted] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -38,12 +43,12 @@ export default function LoginPage() {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         background: "linear-gradient(135deg, #1a2e1e 0%, #0f1a11 100%)",
-        padding: 20,
+        padding: "24px 16px",
       }}
     >
       <div
@@ -90,136 +95,148 @@ export default function LoginPage() {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <label
-              htmlFor="login-email"
-              style={{
-                display: "block",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--text-secondary)",
-                marginBottom: 6,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              Email
-            </label>
-            <input
-              id="login-email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@oleificio.it"
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                borderRadius: 8,
-                border: "1.5px solid var(--border)",
-                backgroundColor: "var(--bg-app)",
-                color: "var(--text-primary)",
-                fontSize: 14,
-                outline: "none",
-                boxSizing: "border-box",
-                transition: "border-color 0.15s",
-              }}
-              onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
-              onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
-            />
+        {!mounted ? (
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: 180 }}>
+            <Loader2 size={24} style={{ animation: "spin 1s linear infinite", color: "var(--accent)" }} />
           </div>
-
-          <div>
-            <label
-              htmlFor="login-password"
-              style={{
-                display: "block",
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--text-secondary)",
-                marginBottom: 6,
-                textTransform: "uppercase",
-                letterSpacing: "0.05em",
-              }}
-            >
-              Password
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              style={{
-                width: "100%",
-                padding: "10px 14px",
-                borderRadius: 8,
-                border: "1.5px solid var(--border)",
-                backgroundColor: "var(--bg-app)",
-                color: "var(--text-primary)",
-                fontSize: 14,
-                outline: "none",
-                boxSizing: "border-box",
-                transition: "border-color 0.15s",
-              }}
-              onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
-              onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
-            />
-          </div>
-
-          {/* Errore */}
-          {error && (
-            <div
-              style={{
-                padding: "10px 14px",
-                borderRadius: 8,
-                backgroundColor: "rgba(220,38,38,0.1)",
-                border: "1px solid rgba(220,38,38,0.3)",
-                color: "#f87171",
-                fontSize: 13,
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          <button
-            id="login-submit-btn"
-            type="submit"
-            disabled={loading}
-            style={{
-              marginTop: 4,
-              padding: "12px",
-              borderRadius: 8,
-              background: loading
-                ? "var(--border)"
-                : "linear-gradient(135deg, #5F9E74 0%, #3A6347 100%)",
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: 14,
-              border: "none",
-              cursor: loading ? "not-allowed" : "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              transition: "opacity 0.15s",
-            }}
+        ) : (
+          <form
+            suppressHydrationWarning
+            onSubmit={handleSubmit}
+            style={{ display: "flex", flexDirection: "column", gap: 16 }}
           >
-            {loading ? (
-              <>
-                <Loader2 size={16} style={{ animation: "spin 0.8s linear infinite" }} />
-                Accesso in corso…
-              </>
-            ) : (
-              "Accedi"
+            <div>
+              <label
+                htmlFor="login-email"
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
+                  marginBottom: 6,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                Email
+              </label>
+              <input
+                suppressHydrationWarning
+                id="login-email"
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="admin@oleificio.it"
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  border: "1.5px solid var(--border)",
+                  backgroundColor: "var(--bg-app)",
+                  color: "var(--text-primary)",
+                  fontSize: 16,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  transition: "border-color 0.15s",
+                }}
+                onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="login-password"
+                style={{
+                  display: "block",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--text-secondary)",
+                  marginBottom: 6,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                Password
+              </label>
+              <input
+                suppressHydrationWarning
+                id="login-password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                style={{
+                  width: "100%",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  border: "1.5px solid var(--border)",
+                  backgroundColor: "var(--bg-app)",
+                  color: "var(--text-primary)",
+                  fontSize: 16,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  transition: "border-color 0.15s",
+                }}
+                onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+                onBlur={(e) => (e.target.style.borderColor = "var(--border)")}
+              />
+            </div>
+
+            {/* Errore */}
+            {error && (
+              <div
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  backgroundColor: "rgba(220,38,38,0.1)",
+                  border: "1px solid rgba(220,38,38,0.3)",
+                  color: "#f87171",
+                  fontSize: 13,
+                }}
+              >
+                {error}
+              </div>
             )}
-          </button>
-        </form>
+
+            <button
+              id="login-submit-btn"
+              type="submit"
+              disabled={loading}
+              style={{
+                marginTop: 4,
+                padding: "12px",
+                borderRadius: 8,
+                background: loading
+                  ? "var(--border)"
+                  : "linear-gradient(135deg, #5F9E74 0%, #3A6347 100%)",
+                color: "#fff",
+                fontWeight: 700,
+                fontSize: 15,
+                border: "none",
+                cursor: loading ? "not-allowed" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                transition: "opacity 0.15s",
+              }}
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={16} style={{ animation: "spin 0.8s linear infinite" }} />
+                  Accesso in corso…
+                </>
+              ) : (
+                "Accedi"
+              )}
+            </button>
+          </form>
+        )}
       </div>
 
       <style>{`

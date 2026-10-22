@@ -86,6 +86,11 @@ export interface Batch {
 export interface Weighing {
   id?: string;
   batchId: string;
+  binId?: string;
+  binIdentifier?: string;
+  isCustomerBin?: boolean;
+  binType?: "oleificio" | "cliente" | "sfuso";
+  customerBinNotes?: string;
   grossWeightKg?: number;
   tare?: number;
   weightKg: number;

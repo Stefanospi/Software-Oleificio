@@ -1,9 +1,10 @@
 "use client";
 
-import { Plus, Box, CheckCircle, Clock, Truck, Loader2, Pencil, Trash2 } from "lucide-react";
+import { Plus, Box, CheckCircle, Clock, Truck, Loader2, Pencil, Trash2, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
-import { getBins, addBin, getCustomers, updateBinStatus, deleteBin } from "@/lib/db";
+import { getBins, addBin, getCustomers, updateBinStatus, deleteBin, createBatchBins } from "@/lib/db";
 import { Modal } from "@/components/Modal";
+import { useAuth } from "@/context/AuthContext";
 import type { Bin, BinStatus, Customer } from "@/types";
 
 const STATUS_CONFIG: Record<BinStatus, { label: string; badgeClass: string; icon: React.ElementType }> = {
@@ -13,6 +14,7 @@ const STATUS_CONFIG: Record<BinStatus, { label: string; badgeClass: string; icon
 };
 
 export default function BinsPage() {
+  const { isAdmin } = useAuth();
   const [bins, setBins] = useState<Bin[]>([]);
   const [clienti, setClienti] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +24,13 @@ export default function BinsPage() {
   const [newId, setNewId] = useState("");
   const [newCapacity, setNewCapacity] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Modal generazione massiva 208 Bins
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkCount, setBulkCount] = useState("208");
+  const [bulkCapacity, setBulkCapacity] = useState("350");
+  const [bulkPrefix, setBulkPrefix] = useState("BIN-");
+  const [generatingBulk, setGeneratingBulk] = useState(false);
 
   // Modal modifica
   const [editBin, setEditBin] = useState<Bin | null>(null);
@@ -42,6 +51,22 @@ export default function BinsPage() {
       console.error("Errore caricamento:", e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGenerateBulk = async () => {
+    const count = parseInt(bulkCount, 10);
+    const capacity = parseFloat(bulkCapacity);
+    if (isNaN(count) || count <= 0 || isNaN(capacity) || capacity <= 0) return;
+    setGeneratingBulk(true);
+    try {
+      await createBatchBins(count, capacity, bulkPrefix.trim() || "BIN-");
+      setShowBulkModal(false);
+      await fetchDati();
+    } catch (err) {
+      console.error("Errore generazione batch bins:", err);
+    } finally {
+      setGeneratingBulk(false);
     }
   };
 
@@ -100,10 +125,23 @@ export default function BinsPage() {
             {bins.filter(b => b.status !== "AVAILABLE").length} di {bins.length} bins in uso
           </p>
         </div>
-        <button className="btn-primary" onClick={() => setShowNew(true)}>
-          <Plus size={17} />
-          Nuovo Bin
-        </button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          {isAdmin && (
+            <button
+              className="btn-secondary"
+              onClick={() => setShowBulkModal(true)}
+              style={{ color: "var(--accent)", borderColor: "var(--border)" }}
+              title="Genera automaticamente tutti i 208 cassoni dell'oleificio"
+            >
+              <Zap size={16} />
+              Genera 208 Bins in Blocco
+            </button>
+          )}
+          <button className="btn-primary" onClick={() => setShowNew(true)}>
+            <Plus size={17} />
+            Nuovo Bin
+          </button>
+        </div>
       </div>
 
       {/* Contatori */}
@@ -277,6 +315,87 @@ export default function BinsPage() {
             ⚠️ Impostare lo stato su &quot;Libero&quot; rimuoverà l&apos;associazione al cliente.
           </p>
         )}
+      </Modal>
+
+      {/* Modal Generazione Massiva 208 Bins */}
+      <Modal
+        isOpen={showBulkModal}
+        onClose={() => !generatingBulk && setShowBulkModal(false)}
+        title="Generazione Massiva Bins Oleificio"
+        size="md"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setShowBulkModal(false)} disabled={generatingBulk}>
+              Annulla
+            </button>
+            <button className="btn-primary" onClick={handleGenerateBulk} disabled={generatingBulk}>
+              {generatingBulk ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <Zap size={14} />}
+              {generatingBulk ? "Generazione in corso..." : `Genera ${bulkCount} Bins Ora`}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div
+            style={{
+              padding: "12px 14px",
+              background: "var(--accent-light)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-sm)",
+              fontSize: 13,
+              color: "var(--text-primary)",
+              lineHeight: 1.45,
+            }}
+          >
+            ⚡ Questa procedura genera automaticamente l&apos;intero parco cassoni aziendale dell&apos;oleificio numerati progressivamente in un unico blocco, impostandoli tutti come <strong>Liberi (AVAILABLE)</strong>.
+          </div>
+
+          <div className="form-row form-row-2">
+            <div className="form-group">
+              <label>Numero di Bins da creare *</label>
+              <input
+                type="number"
+                value={bulkCount}
+                onChange={(e) => setBulkCount(e.target.value)}
+                min={1}
+                max={500}
+                placeholder="208"
+                disabled={generatingBulk}
+              />
+            </div>
+            <div className="form-group">
+              <label>Capacità standard per bin (kg) *</label>
+              <input
+                type="number"
+                value={bulkCapacity}
+                onChange={(e) => setBulkCapacity(e.target.value)}
+                min={10}
+                placeholder="350"
+                disabled={generatingBulk}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Prefisso identificativo</label>
+            <input
+              type="text"
+              value={bulkPrefix}
+              onChange={(e) => setBulkPrefix(e.target.value)}
+              placeholder="BIN-"
+              disabled={generatingBulk}
+            />
+            <span style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+              Esempio con prefisso &quot;{bulkPrefix}&quot;: <code>{bulkPrefix}001</code> fino a <code>{bulkPrefix}{bulkCount.padStart(3, "0")}</code>.
+            </span>
+          </div>
+
+          {generatingBulk && (
+            <div style={{ textAlign: "center", padding: "16px 0", color: "var(--accent)", fontSize: 13, fontWeight: 600 }}>
+              Salvataggio in batch su Firestore in corso, attendere qualche istante...
+            </div>
+          )}
+        </div>
       </Modal>
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>

@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   // Funziona perché tutte le pagine sono "use client" (nessun SSR necessario)
   output: "export",
   trailingSlash: true,
+  allowedDevOrigins: ['192.168.1.88'],
+  devIndicators: false,
 };
 
 export default nextConfig;

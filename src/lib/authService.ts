@@ -52,14 +52,18 @@ export const createUserProfile = async (
   displayName: string,
   role: UserRole
 ) => {
-  await setDoc(doc(db, "users", uid), {
-    uid,
-    email,
-    displayName,
-    role,
-    createdAt: serverTimestamp(),
-    lastLogin: serverTimestamp(),
-  } satisfies Omit<UserProfile, "createdAt" | "lastLogin"> & Record<string, unknown>);
+  await setDoc(
+    doc(db, "users", uid),
+    {
+      uid,
+      email,
+      displayName,
+      role,
+      createdAt: serverTimestamp(),
+      lastLogin: serverTimestamp(),
+    } satisfies Omit<UserProfile, "createdAt" | "lastLogin"> & Record<string, unknown>,
+    { merge: true }
+  );
 };
 
 // ─── CREA ACCOUNT AUTH (seconda istanza, non slogga l'admin) ──────────────────

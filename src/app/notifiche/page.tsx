@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import {
   getAllNotifications,
+  subscribeToAllNotifications,
   markNotificationRead,
   markAllNotificationsRead,
   deleteNotification,
@@ -28,20 +29,13 @@ export default function NotifichePage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "unread" | "read">("all");
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const list = await getAllNotifications(100);
-      setNotifications(list);
-    } catch (err) {
-      console.error("Errore caricamento notifiche:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadData();
+    setLoading(true);
+    const unsubscribe = subscribeToAllNotifications((list) => {
+      setNotifications(list);
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, []);
 
   const handleMarkAsRead = async (id?: string) => {

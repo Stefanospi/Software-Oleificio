@@ -11,6 +11,17 @@ import {
 } from "firebase/firestore";
 import type { Customer, Bin, Batch, Weighing, Milling, Container } from "../types";
 
+// Helper: rimuove qualsiasi campo con valore undefined che manderebbe in errore Firestore SDK
+const sanitizeData = <T extends Record<string, unknown>>(data: T): Partial<T> => {
+  const clean: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(data)) {
+    if (val !== undefined) {
+      clean[key] = val;
+    }
+  }
+  return clean as Partial<T>;
+};
+
 // --- CUSTOMERS ---
 export const getCustomers = async () => {
   const snapshot = await getDocs(collection(db, "customers"));
@@ -18,13 +29,15 @@ export const getCustomers = async () => {
 };
 
 export const addCustomer = async (customer: Omit<Customer, "id">) => {
-  const docRef = await addDoc(collection(db, "customers"), { ...customer, createdAt: new Date() });
+  const clean = sanitizeData(customer as Record<string, unknown>);
+  const docRef = await addDoc(collection(db, "customers"), { ...clean, createdAt: new Date() });
   return docRef.id;
 };
 
 export const updateCustomer = async (id: string, data: Partial<Customer>) => {
+  const clean = sanitizeData(data as Record<string, unknown>);
   const ref = doc(db, "customers", id);
-  await updateDoc(ref, data);
+  await updateDoc(ref, clean);
 };
 
 export const deleteCustomer = async (id: string) => {
@@ -38,17 +51,51 @@ export const getBins = async () => {
 };
 
 export const addBin = async (bin: Omit<Bin, "id">) => {
-  const docRef = await addDoc(collection(db, "bins"), bin);
+  const clean = sanitizeData(bin as Record<string, unknown>);
+  const docRef = await addDoc(collection(db, "bins"), clean);
   return docRef.id;
 };
 
 export const updateBinStatus = async (id: string, updates: Partial<Bin>) => {
+  const clean = sanitizeData(updates as Record<string, unknown>);
   const binRef = doc(db, "bins", id);
-  await updateDoc(binRef, updates);
+  await updateDoc(binRef, clean);
 };
 
 export const deleteBin = async (id: string) => {
   await deleteDoc(doc(db, "bins", id));
+};
+
+// Inserimento massivo dei Bins dell'Oleificio (con batch write Firestore)
+export const createBatchBins = async (
+  total = 208,
+  capacityKg = 350,
+  prefix = "BIN-"
+): Promise<number> => {
+  const { writeBatch } = await import("firebase/firestore");
+  // Firestore supporta max 500 operazioni per batch
+  const chunkSize = 200;
+  let createdCount = 0;
+
+  for (let i = 1; i <= total; i += chunkSize) {
+    const batch = writeBatch(db);
+    const end = Math.min(i + chunkSize - 1, total);
+    for (let num = i; num <= end; num++) {
+      const paddedNum = num.toString().padStart(3, "0");
+      const identifier = `${prefix}${paddedNum}`;
+      const docRef = doc(collection(db, "bins"));
+      batch.set(docRef, {
+        identifier,
+        capacityKg,
+        status: "AVAILABLE",
+        createdAt: new Date(),
+      });
+      createdCount++;
+    }
+    await batch.commit();
+  }
+
+  return createdCount;
 };
 
 // --- BATCHES ---
@@ -58,12 +105,14 @@ export const getBatches = async () => {
 };
 
 export const addBatch = async (batch: Omit<Batch, "id">) => {
-  const docRef = await addDoc(collection(db, "batches"), { ...batch, createdAt: new Date() });
+  const clean = sanitizeData(batch as Record<string, unknown>);
+  const docRef = await addDoc(collection(db, "batches"), { ...clean, createdAt: new Date() });
   return docRef.id;
 };
 
 export const updateBatch = async (id: string, data: Partial<Batch>) => {
-  await updateDoc(doc(db, "batches", id), data);
+  const clean = sanitizeData(data as Record<string, unknown>);
+  await updateDoc(doc(db, "batches", id), clean);
 };
 
 export const deleteBatch = async (id: string) => {
@@ -78,12 +127,20 @@ export const getWeighingsForBatch = async (batchId: string) => {
 };
 
 export const addWeighing = async (weighing: Omit<Weighing, "id">) => {
-  const docRef = await addDoc(collection(db, "weighings"), { ...weighing, createdAt: new Date() });
+  const cleanData: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(weighing)) {
+    if (value !== undefined) cleanData[key] = value;
+  }
+  const docRef = await addDoc(collection(db, "weighings"), { ...cleanData, createdAt: new Date() });
   return docRef.id;
 };
 
 export const updateWeighing = async (id: string, data: Partial<Weighing>) => {
-  await updateDoc(doc(db, "weighings", id), data);
+  const cleanData: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) cleanData[key] = value;
+  }
+  await updateDoc(doc(db, "weighings", id), cleanData);
 };
 
 export const deleteWeighing = async (id: string) => {

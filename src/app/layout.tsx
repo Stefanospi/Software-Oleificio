@@ -13,17 +13,31 @@ export const metadata: Metadata = {
     "Software professionale per la gestione di un oleificio: clienti, bins, partite, contenitori olio.",
 };
 
+// Patch per evitare NotFoundError su touch device / Next.js devtools
+if (typeof window !== "undefined" && typeof Element !== "undefined" && Element.prototype.releasePointerCapture) {
+  const origReleasePointerCapture = Element.prototype.releasePointerCapture;
+  Element.prototype.releasePointerCapture = function (pointerId: number) {
+    try {
+      if (this.hasPointerCapture && this.hasPointerCapture(pointerId)) {
+        origReleasePointerCapture.call(this, pointerId);
+      }
+    } catch (_) {
+      // Ignora l'eccezione nativa se l'elemento è già stato rilasciato
+    }
+  };
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="it">
+    <html lang="it" suppressHydrationWarning>
       <body
         suppressHydrationWarning
         className={inter.className}
-        style={{ height: "100vh", overflow: "hidden", backgroundColor: "var(--bg-app)" }}
+        style={{ minHeight: "100dvh", backgroundColor: "var(--bg-app)" }}
       >
         <AuthProvider>
           <LayoutWrapper>{children}</LayoutWrapper>

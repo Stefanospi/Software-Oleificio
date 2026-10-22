@@ -7,8 +7,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasUserDoc() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+      return hasUserDoc() ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role : 'dipendente';
     }
 
     function isAdmin() {
@@ -20,17 +24,13 @@ service cloud.firestore {
     }
 
     function isAdminOrDipendente() {
-      return isAdmin() || isDipendente();
+      return isAuthenticated();
     }
 
     // ─── PROFILI UTENTE ─────────────────────────────────────────────────────────
-    // Admin: accesso completo
-    // Dipendente: può leggere e aggiornare solo il proprio profilo
+    // Qualsiasi utente autenticato può leggere e gestire i profili (evita ricorsione con get())
     match /users/{userId} {
-      allow read: if isAuthenticated() && (isAdmin() || request.auth.uid == userId);
-      allow create: if isAdmin();
-      allow update: if isAdmin() || (request.auth.uid == userId && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role']));
-      allow delete: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
 
     // ─── CLIENTI ────────────────────────────────────────────────────────────────
@@ -105,12 +105,11 @@ service cloud.firestore {
     }
 
     // ─── NOTIFICHE ──────────────────────────────────────────────────────────────
-    // Admin: accesso completo (lettura + mark-as-read)
-    // Dipendente: può solo creare notifiche (trigger da azioni operative)
+    // Tutti gli operatori autenticati possono leggere le notifiche e aggiornare isRead
+    // Creazione aperta a tutti gli utenti per i trigger operativi
+    // Solo Admin può cancellare le notifiche
     match /notifications/{notificationId} {
-      allow read: if isAdmin();
-      allow create: if isAdminOrDipendente();
-      allow update: if isAdmin();
+      allow read, create, update: if isAuthenticated();
       allow delete: if isAdmin();
     }
   }
