@@ -28,9 +28,17 @@ service cloud.firestore {
     }
 
     // ─── PROFILI UTENTE ─────────────────────────────────────────────────────────
-    // Qualsiasi utente autenticato può leggere e gestire i profili (evita ricorsione con get())
     match /users/{userId} {
-      allow read, write: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (
+        isAdmin() ||
+        (request.auth.uid == userId && request.resource.data.role == 'dipendente')
+      );
+      allow update: if isAuthenticated() && (
+        isAdmin() ||
+        (request.auth.uid == userId && (!('role' in request.resource.data) || request.resource.data.role == resource.data.role))
+      );
+      allow delete: if isAdmin();
     }
 
     // ─── CLIENTI ────────────────────────────────────────────────────────────────

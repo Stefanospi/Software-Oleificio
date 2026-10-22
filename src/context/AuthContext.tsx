@@ -41,35 +41,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (firebaseUser) {
           try {
             let userProfile = await getUserProfile(firebaseUser.uid);
-            // Se l'utente non ha ancora un documento profilo o il campo role non è impostato:
-            // L'amministratore principale (sspitaleri26@gmail.com) riceve "admin", tutti gli altri ricevono "dipendente"
-            const isMasterAdmin = firebaseUser.email?.toLowerCase() === "sspitaleri26@gmail.com";
-            const fallbackRole: UserRole = isMasterAdmin ? "admin" : "dipendente";
 
             if (!userProfile || !userProfile.role) {
-              const defaultRole: UserRole = fallbackRole;
+              // Profilo non presente su Firestore: crealo con ruolo dipendente (principio del minimo privilegio)
+              const defaultRole: UserRole = "dipendente";
+              const displayName =
+                firebaseUser.displayName ||
+                firebaseUser.email?.split("@")[0] ||
+                "Utente";
+
               await createUserProfile(
                 firebaseUser.uid,
                 firebaseUser.email || "",
-                firebaseUser.displayName || firebaseUser.email?.split("@")[0] || (isMasterAdmin ? "Amministratore" : "Dipendente"),
+                displayName,
                 defaultRole
               );
+
               userProfile = {
                 uid: firebaseUser.uid,
                 email: firebaseUser.email || "",
-                displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || (isMasterAdmin ? "Amministratore" : "Dipendente"),
+                displayName,
                 role: defaultRole,
               };
             }
             setProfile(userProfile);
           } catch (profileErr) {
-            console.warn("Profilo utente non trovato o errore lettura, imposto profilo di fallback:", profileErr);
-            const isMasterAdmin = firebaseUser.email?.toLowerCase() === "sspitaleri26@gmail.com";
+            console.warn("Profilo utente non trovato o errore lettura:", profileErr);
             setProfile({
               uid: firebaseUser.uid,
               email: firebaseUser.email || "",
-              displayName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || (isMasterAdmin ? "Amministratore" : "Dipendente"),
-              role: isMasterAdmin ? "admin" : "dipendente",
+              displayName:
+                firebaseUser.displayName ||
+                firebaseUser.email?.split("@")[0] ||
+                "Utente",
+              role: "dipendente",
             });
           }
         } else {
