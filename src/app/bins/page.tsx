@@ -2,7 +2,7 @@
 
 import { Plus, Box, CheckCircle, Clock, Truck, Loader2, Pencil, Trash2, Zap } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
-import { getBins, addBin, getCustomers, updateBinStatus, deleteBin, createBatchBins } from "@/lib/db";
+import { getBins, addBin, getCustomers, updateBinStatus, deleteBin, deleteAllBins, createBatchBins } from "@/lib/db";
 import { Modal } from "@/components/Modal";
 import { useAuth } from "@/context/AuthContext";
 import type { Bin, BinStatus, Customer } from "@/types";
@@ -28,7 +28,7 @@ export default function BinsPage() {
   // Modal generazione massiva 208 Bins
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkCount, setBulkCount] = useState("208");
-  const [bulkCapacity, setBulkCapacity] = useState("350");
+  const [bulkCapacity, setBulkCapacity] = useState("250");
   const [bulkPrefix, setBulkPrefix] = useState("BIN-");
   const [generatingBulk, setGeneratingBulk] = useState(false);
 
@@ -67,6 +67,22 @@ export default function BinsPage() {
       console.error("Errore generazione batch bins:", err);
     } finally {
       setGeneratingBulk(false);
+    }
+  };
+
+  const [showDeleteAll, setShowDeleteAll] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+
+  const handleDeleteAll = async () => {
+    setDeletingAll(true);
+    try {
+      await deleteAllBins();
+      setShowDeleteAll(false);
+      await fetchDati();
+    } catch (err) {
+      console.error("Errore eliminazione bins:", err);
+    } finally {
+      setDeletingAll(false);
     }
   };
 
@@ -144,6 +160,15 @@ export default function BinsPage() {
             >
               <Zap size={16} />
               Genera 208 Bins in Blocco
+            </button>
+          )}
+          {isAdmin && bins.length > 0 && (
+            <button
+              className="btn-secondary"
+              onClick={() => setShowDeleteAll(true)}
+              style={{ color: "var(--red-text, #c0392b)" }}
+            >
+              Elimina tutti i Bins
             </button>
           )}
           <button className="btn-primary" onClick={() => setShowNew(true)}>
@@ -326,6 +351,26 @@ export default function BinsPage() {
         )}
       </Modal>
 
+      <Modal
+        isOpen={showDeleteAll}
+        onClose={() => !deletingAll && setShowDeleteAll(false)}
+        title="Elimina tutti i Bins"
+        size="sm"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setShowDeleteAll(false)} disabled={deletingAll}>Annulla</button>
+            <button className="btn-primary" onClick={handleDeleteAll} disabled={deletingAll}>
+              {deletingAll && <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />}
+              Elimina {bins.length} bins
+            </button>
+          </>
+        }
+      >
+        <p style={{ fontSize: 14, lineHeight: 1.5 }}>
+          Verranno eliminati definitivamente tutti i {bins.length} bins, compresi quelli prenotati o carichi. Poi potrai rigenerarli con capacità 250 kg. Le pesate già registrate mantengono l&apos;identificativo del bin. Operazione non reversibile.
+        </p>
+      </Modal>
+
       {/* Modal Generazione Massiva 208 Bins */}
       <Modal
         isOpen={showBulkModal}
@@ -379,7 +424,7 @@ export default function BinsPage() {
                 value={bulkCapacity}
                 onChange={(e) => setBulkCapacity(e.target.value)}
                 min={10}
-                placeholder="350"
+                placeholder="250"
                 disabled={generatingBulk}
               />
             </div>

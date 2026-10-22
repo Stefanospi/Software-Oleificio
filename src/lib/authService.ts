@@ -20,17 +20,16 @@ import type { UserProfile, UserRole } from "../types";
 // ─── LOGIN ─────────────────────────────────────────────────────────────────────
 export const loginWithEmail = async (email: string, password: string) => {
   const credential = await signInWithEmailAndPassword(auth, email, password);
-  // Aggiorna lastLogin in modo sicuro (merge evita errori se il doc non esiste ancora)
+  return credential.user;
+};
+
+// Eseguito dopo il caricamento del profilo, per non creare una scrittura concorrente alla lettura
+export const touchLastLogin = async (uid: string) => {
   try {
-    await setDoc(
-      doc(db, "users", credential.user.uid),
-      { lastLogin: serverTimestamp() },
-      { merge: true }
-    );
+    await updateDoc(doc(db, "users", uid), { lastLogin: serverTimestamp() });
   } catch (err) {
     console.warn("Impossibile aggiornare lastLogin su Firestore:", err);
   }
-  return credential.user;
 };
 
 // ─── LOGOUT ────────────────────────────────────────────────────────────────────

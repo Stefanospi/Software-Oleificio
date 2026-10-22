@@ -65,17 +65,36 @@ export const addBin = async (bin: Omit<Bin, "id">) => {
 export const updateBinStatus = async (id: string, updates: Partial<Bin>) => {
   const clean = sanitizeData(updates as Record<string, unknown>);
   const binRef = doc(db, "bins", id);
-  await updateDoc(binRef, clean);
+  try {
+    await updateDoc(binRef, clean);
+  } catch (err) {
+    // Il bin può essere stato eliminato (es. reset del parco bins): non bloccare le operazioni sulle pesate
+    if ((err as { code?: string })?.code === "not-found") return;
+    throw err;
+  }
 };
 
 export const deleteBin = async (id: string) => {
   await deleteDoc(doc(db, "bins", id));
 };
 
+// Elimina tutti i bins (solo admin)
+export const deleteAllBins = async (): Promise<number> => {
+  const { writeBatch } = await import("firebase/firestore");
+  const snapshot = await getDocs(collection(db, "bins"));
+  const docs = snapshot.docs;
+  for (let i = 0; i < docs.length; i += 400) {
+    const batch = writeBatch(db);
+    docs.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+  }
+  return docs.length;
+};
+
 // Inserimento massivo dei Bins dell'Oleificio (con batch write Firestore e ID deterministico progressivo)
 export const createBatchBins = async (
   total = 208,
-  capacityKg = 350,
+  capacityKg = 250,
   prefix = "BIN-"
 ): Promise<number> => {
   const { writeBatch } = await import("firebase/firestore");
