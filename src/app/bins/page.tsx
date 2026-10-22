@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus, Box, CheckCircle, Clock, Truck, Loader2, Pencil, Trash2, Zap } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { getBins, addBin, getCustomers, updateBinStatus, deleteBin, createBatchBins } from "@/lib/db";
 import { Modal } from "@/components/Modal";
 import { useAuth } from "@/context/AuthContext";
@@ -109,10 +109,19 @@ export default function BinsPage() {
     await fetchDati();
   };
 
+  const sortedBins = useMemo(() => {
+    return [...bins].sort((a, b) =>
+      (a.identifier || "").localeCompare(b.identifier || "", undefined, {
+        numeric: true,
+        sensitivity: "base",
+      })
+    );
+  }, [bins]);
+
   const grouped = {
-    AVAILABLE: bins.filter(b => b.status === "AVAILABLE"),
-    RESERVED:  bins.filter(b => b.status === "RESERVED"),
-    LOADED:    bins.filter(b => b.status === "LOADED"),
+    AVAILABLE: sortedBins.filter(b => b.status === "AVAILABLE"),
+    RESERVED:  sortedBins.filter(b => b.status === "RESERVED"),
+    LOADED:    sortedBins.filter(b => b.status === "LOADED"),
   };
 
   return (
@@ -190,7 +199,7 @@ export default function BinsPage() {
               </tr>
             </thead>
             <tbody>
-              {bins.map(bin => {
+              {sortedBins.map(bin => {
                 const cfg = STATUS_CONFIG[bin.status];
                 const Icon = cfg.icon;
                 const cliente = clienti.find(c => c.id === bin.customerId);

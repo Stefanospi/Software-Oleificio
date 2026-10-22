@@ -47,7 +47,13 @@ export const deleteCustomer = async (id: string) => {
 // --- BINS ---
 export const getBins = async () => {
   const snapshot = await getDocs(collection(db, "bins"));
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bin));
+  const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bin));
+  return list.sort((a, b) =>
+    (a.identifier || "").localeCompare(b.identifier || "", undefined, {
+      numeric: true,
+      sensitivity: "base",
+    })
+  );
 };
 
 export const addBin = async (bin: Omit<Bin, "id">) => {
@@ -66,7 +72,7 @@ export const deleteBin = async (id: string) => {
   await deleteDoc(doc(db, "bins", id));
 };
 
-// Inserimento massivo dei Bins dell'Oleificio (con batch write Firestore)
+// Inserimento massivo dei Bins dell'Oleificio (con batch write Firestore e ID deterministico progressivo)
 export const createBatchBins = async (
   total = 208,
   capacityKg = 350,
@@ -83,9 +89,11 @@ export const createBatchBins = async (
     for (let num = i; num <= end; num++) {
       const paddedNum = num.toString().padStart(3, "0");
       const identifier = `${prefix}${paddedNum}`;
-      const docRef = doc(collection(db, "bins"));
+      // Usiamo identifier come ID univoco del documento Firestore: ordinamento e unicità perfetti
+      const docRef = doc(db, "bins", identifier);
       batch.set(docRef, {
         identifier,
+        binNumber: num,
         capacityKg,
         status: "AVAILABLE",
         createdAt: new Date(),
