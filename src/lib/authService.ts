@@ -2,6 +2,8 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword as signInSecondary,
   type User,
 } from "firebase/auth";
 import {
@@ -9,9 +11,10 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   serverTimestamp,
 } from "firebase/firestore";
-import { auth, db } from "./firebase";
+import { auth, db, secondaryAuth } from "./firebase";
 import type { UserProfile, UserRole } from "../types";
 
 // ─── LOGIN ─────────────────────────────────────────────────────────────────────
@@ -57,6 +60,22 @@ export const createUserProfile = async (
     createdAt: serverTimestamp(),
     lastLogin: serverTimestamp(),
   } satisfies Omit<UserProfile, "createdAt" | "lastLogin"> & Record<string, unknown>);
+};
+
+// ─── CREA ACCOUNT AUTH (seconda istanza, non slogga l'admin) ──────────────────
+export const createAccountWithSecondaryAuth = async (
+  email: string,
+  password: string
+): Promise<string> => {
+  const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+  // Fai subito logout dalla sessione secondaria: non serve tenerla aperta
+  await signOut(secondaryAuth);
+  return credential.user.uid;
+};
+
+// ─── ELIMINA PROFILO UTENTE ───────────────────────────────────────────────────
+export const deleteUserProfile = async (uid: string): Promise<void> => {
+  await deleteDoc(doc(db, "users", uid));
 };
 
 // ─── AGGIORNA RUOLO ────────────────────────────────────────────────────────────

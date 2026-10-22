@@ -16,14 +16,16 @@ import type { Payment, PaymentStatus, PaymentMethod } from "../types";
 const COL = "payments";
 
 // ─── LETTURA ───────────────────────────────────────────────────────────────────
+const sortByCreated = (a: Payment, b: Payment): number => {
+  const tA = (a.createdAt as any)?.toMillis?.() ?? 0;
+  const tB = (b.createdAt as any)?.toMillis?.() ?? 0;
+  return tB - tA;
+};
+
 export const getPaymentsByCustomer = async (customerId: string): Promise<Payment[]> => {
-  const q = query(
-    collection(db, COL),
-    where("customerId", "==", customerId),
-    orderBy("createdAt", "desc")
-  );
+  const q = query(collection(db, COL), where("customerId", "==", customerId));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment)).sort(sortByCreated);
 };
 
 export const getPaymentByBatch = async (batchId: string): Promise<Payment | null> => {
@@ -34,19 +36,17 @@ export const getPaymentByBatch = async (batchId: string): Promise<Payment | null
 };
 
 export const getAllPayments = async (): Promise<Payment[]> => {
-  const q = query(collection(db, COL), orderBy("createdAt", "desc"));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment));
+  const snap = await getDocs(collection(db, COL));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment)).sort(sortByCreated);
 };
 
+// Alias per compatibilità con la pagina pagamenti
+export const getPayments = getAllPayments;
+
 export const getUnpaidPayments = async (): Promise<Payment[]> => {
-  const q = query(
-    collection(db, COL),
-    where("status", "in", ["unpaid", "partial"]),
-    orderBy("createdAt", "desc")
-  );
+  const q = query(collection(db, COL), where("status", "in", ["unpaid", "partial"]));
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment));
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Payment)).sort(sortByCreated);
 };
 
 // ─── CREAZIONE ─────────────────────────────────────────────────────────────────

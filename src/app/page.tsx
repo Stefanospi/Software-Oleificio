@@ -4,8 +4,10 @@ import { Users, Box, ClipboardList, Droplets, Loader2, TrendingUp, ArrowRight } 
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getCustomers, getBins, getBatches, getContainers } from "@/lib/db";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Home() {
+  const { loading: authLoading, user } = useAuth();
   const [stats, setStats] = useState({
     clienti: 0,
     binsUsati: 0,
@@ -16,6 +18,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Aspettiamo che l'utente sia autenticato prima di fare query Firestore
+    if (authLoading || !user) return;
     async function loadStats() {
       try {
         const [clienti, bins, partite, contenitori] = await Promise.all([
@@ -43,7 +47,7 @@ export default function Home() {
       }
     }
     loadStats();
-  }, []);
+  }, [authLoading, user]);
 
   const statCards = [
     {

@@ -514,7 +514,34 @@ button {
 .sidebar-nav-list { flex-direction: column; }
 .sidebar-footer { display: flex; }
 
+/* Mobile Top Bar (nascosta su desktop) */
+.mobile-topbar {
+  display: none;
+}
+
 @media (max-width: 768px) {
+  /* Top bar mobile fissa */
+  .mobile-topbar {
+    display: flex;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background-color: var(--bg-sidebar);
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    z-index: 1001;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* Main content: spazio per topbar + bottom nav */
+  .main-content {
+    padding: 72px 16px 88px 16px !important;
+  }
+
+  /* Sidebar diventa bottom nav */
   .sidebar-container {
     width: 100%;
     min-width: 100%;
@@ -525,16 +552,39 @@ button {
     z-index: 1000;
     flex-direction: row;
     border-right: none;
-    border-top: 1px solid rgba(255,255,255,0.06);
-    padding: 0 8px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    padding: 0 4px;
     align-items: center;
     justify-content: space-around;
   }
   .sidebar-logo-area { display: none; }
   .sidebar-footer { display: none; }
-  .sidebar-nav-area { flex: 1; padding: 0 !important; display: flex; align-items: center; justify-content: space-around; overflow: visible !important; }
-  .sidebar-nav-list { flex-direction: row; width: 100%; justify-content: space-around; }
+  .sidebar-nav-area {
+    flex: 1;
+    padding: 0 !important;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    overflow: visible !important;
+  }
+  .sidebar-nav-list {
+    flex-direction: row;
+    width: 100%;
+    justify-content: space-around;
+  }
   .sidebar-nav-item { margin-bottom: 0 !important; }
-  .sidebar-nav-link { flex-direction: column !important; gap: 4px !important; padding: 6px 4px !important; font-size: 10px !important; font-weight: 500 !important; border: none !important; background: transparent !important; }
+  .sidebar-nav-link {
+    flex-direction: column !important;
+    gap: 3px !important;
+    padding: 6px 8px !important;
+    font-size: 10px !important;
+    font-weight: 500 !important;
+    border: none !important;
+    background: transparent !important;
+    min-width: 44px;
+    align-items: center;
+  }
+  .sidebar-nav-label { font-size: 10px !important; }
   .sidebar-nav-menu-title { display: none; }
 }
+

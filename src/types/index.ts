@@ -26,17 +26,24 @@ export interface Customer {
   phone?: string;
   email?: string;
 
+  // Dati nascita (per dichiarazione)
+  birthCity?: string;
+  birthProvince?: string;
+  birthDate?: string; // YYYY-MM-DD
+
   // Dati fiscali
   vatNumber?: string;
   fiscalCode?: string;
   address?: string;
+  addressNumber?: string;
   city?: string;
+  province?: string;
 
   // Note admin
   notes?: string;
 
   // Dichiarazione
-  declarationStatus: DeclarationStatus;
+  declarationStatus?: DeclarationStatus;
   declarationFileUrl?: string;
   declarationGeneratedAt?: Timestamp;
 

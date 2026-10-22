@@ -12,9 +12,15 @@ const firebaseConfig = {
   measurementId: "G-L2G63Z4XX4"
 };
 
-// Inizializza Firebase solo se non è già stato inizializzato
+// App principale (autenticazione admin, Firestore)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-export { app, db, auth };
+// App secondaria: usata SOLO per creare nuovi account (non modifica la sessione admin)
+const SECONDARY_NAME = "secondary";
+const secondaryApp = getApps().find((a) => a.name === SECONDARY_NAME)
+  ?? initializeApp(firebaseConfig, SECONDARY_NAME);
+const secondaryAuth = getAuth(secondaryApp);
+
+export { app, db, auth, secondaryAuth };
