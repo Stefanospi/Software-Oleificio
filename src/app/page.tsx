@@ -3,8 +3,9 @@
 import { Users, Box, ClipboardList, Droplets, Loader2, TrendingUp, ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getCustomers, getBins, getBatches, getContainers } from "@/lib/db";
+import { subscribeCustomers, subscribeBins, subscribeBatches, subscribeContainers } from "@/lib/db";
 import { useAuth } from "@/context/AuthContext";
+import type { Customer, Bin, Batch, Container } from "@/types";
 
 export default function Home() {
   const { loading: authLoading, user, profile } = useAuth();
@@ -18,36 +19,33 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Aspettiamo che l'utente sia autenticato e il profilo caricato prima di fare query Firestore
+    // Attende utente e profilo prima di aprire le sottoscrizioni Firestore
     if (authLoading || !user || !profile) return;
-    async function loadStats() {
-      try {
-        const [clienti, bins, partite, contenitori] = await Promise.all([
-          getCustomers(),
-          getBins(),
-          getBatches(),
-          getContainers()
-        ]);
 
-        const binsUsati = bins.filter(b => b.status !== "AVAILABLE").length;
-        const partiteAperte = partite.filter(p => p.status === "OPEN").length;
-        const olioProdotto = contenitori.reduce((acc, curr) => acc + curr.currentLiters, 0);
+    type Data = { clienti: Customer[]; bins: Bin[]; partite: Batch[]; contenitori: Container[] };
+    const data: Partial<Data> = {};
+    const recompute = () => {
+      const { clienti, bins, partite, contenitori } = data;
+      if (!clienti || !bins || !partite || !contenitori) return;
+      setStats({
+        clienti: clienti.length,
+        binsUsati: bins.filter(b => b.status !== "AVAILABLE").length,
+        binsTotali: bins.length,
+        partiteAperte: partite.filter(p => p.status === "OPEN").length,
+        olioProdotto: contenitori.reduce((acc, curr) => acc + curr.currentLiters, 0),
+      });
+      setLoading(false);
+    };
+    const onError = () => setLoading(false);
 
-        setStats({
-          clienti: clienti.length,
-          binsUsati,
-          binsTotali: bins.length,
-          partiteAperte,
-          olioProdotto
-        });
-      } catch (error) {
-        console.error("Errore nel caricamento delle statistiche", error);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadStats();
-  }, [authLoading, user]);
+    const unsubs = [
+      subscribeCustomers((v) => { data.clienti = v; recompute(); }, onError),
+      subscribeBins((v) => { data.bins = v; recompute(); }, onError),
+      subscribeBatches((v) => { data.partite = v; recompute(); }, onError),
+      subscribeContainers((v) => { data.contenitori = v; recompute(); }, onError),
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, [authLoading, user, profile]);
 
   const statCards = [
     {

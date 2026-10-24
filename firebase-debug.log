@@ -1,0 +1,20 @@
+[debug] [2026-10-24T13:58:36.367Z] ----------------------------------------------------------------------
+[debug] [2026-10-24T13:58:36.371Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\spita\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only firestore:rules
+[debug] [2026-10-24T13:58:36.372Z] CLI Version:   15.34.0
+[debug] [2026-10-24T13:58:36.372Z] Platform:      win32
+[debug] [2026-10-24T13:58:36.373Z] Node Version:  v20.13.1
+[debug] [2026-10-24T13:58:36.373Z] Detected Agent: unknown
+[debug] [2026-10-24T13:58:36.373Z] Time:          Sat Oct 24 2026 15:58:36 GMT+0200 (Ora legale dell’Europa centrale)
+[debug] [2026-10-24T13:58:36.373Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-10-24T13:58:36.391Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-10-24T13:59:02.595Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-24T13:59:02.596Z] > authorizing via signed-in user (sspitaleri26@gmail.com)
+[debug] [2026-10-24T13:59:02.596Z] [iam] checking project oleificio-30b84 for permissions ["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]
+[debug] [2026-10-24T13:59:02.598Z] Checked if tokens are valid: true, expires at: 1792852622479
+[debug] [2026-10-24T13:59:02.598Z] Checked if tokens are valid: true, expires at: 1792852622479
+[debug] [2026-10-24T13:59:02.598Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/oleificio-30b84:testIamPermissions [none]
+[debug] [2026-10-24T13:59:02.598Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/oleificio-30b84:testIamPermissions  x-goog-user-project=oleificio-30b84
+[debug] [2026-10-24T13:59:02.599Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/oleificio-30b84:testIamPermissions {"permissions":["datastore.indexes.create","datastore.indexes.delete","datastore.indexes.list","datastore.indexes.update","firebase.projects.get"]}
+[debug] [2026-10-24T13:59:02.882Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-10-24T13:59:02.882Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}

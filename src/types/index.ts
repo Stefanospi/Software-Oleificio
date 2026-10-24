@@ -57,7 +57,7 @@ export interface Customer {
 }
 
 // ─── BINS ──────────────────────────────────────────────────────────────────────
-export type BinStatus = "AVAILABLE" | "RESERVED" | "LOADED";
+export type BinStatus = "AVAILABLE" | "RESERVED" | "PICKED_UP" | "LOADED";
 
 export interface Bin {
   id?: string;
@@ -83,21 +83,27 @@ export interface Batch {
 }
 
 // ─── PESATE ────────────────────────────────────────────────────────────────────
+// Una sola pesata (totale) per partita: i bins sono solo associati, non pesati singolarmente
 export interface Weighing {
   id?: string;
   batchId: string;
+  weightKg?: number;
+  binIds?: string[];
+  binIdentifiers?: string[];
+  customerBinNotes?: string;
+  notes?: string;
+  createdByUid: string;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+
+  // Campi legacy (pesate per singolo bin)
   binId?: string;
   binIdentifier?: string;
   isCustomerBin?: boolean;
   binType?: "oleificio" | "cliente" | "sfuso";
-  customerBinNotes?: string;
   grossWeightKg?: number;
   tare?: number;
-  weightKg: number;
   netWeightKg?: number;
-  createdByUid: string;
-  notes?: string;
-  createdAt?: Timestamp;
 }
 
 // ─── MOLITURA ──────────────────────────────────────────────────────────────────

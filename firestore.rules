@@ -76,9 +76,9 @@ service cloud.firestore {
     // ─── BINS ───────────────────────────────────────────────────────────────────
     match /bins/{binId} {
       allow read: if isAdminOrDipendente();
-      allow create: if isAdmin();
+      allow create: if isAdminOrDipendente();
       allow update: if isAdminOrDipendente();
-      allow delete: if isAdmin();
+      allow delete: if isAdminOrDipendente();
     }
 
     // ─── CONTENITORI OLIO ───────────────────────────────────────────────────────
@@ -99,12 +99,11 @@ service cloud.firestore {
     }
 
     // ─── AGENDA ─────────────────────────────────────────────────────────────────
-    // Admin: accesso completo
-    // Dipendente: sola lettura
+    // Admin e Dipendente: accesso completo (il dipendente non può eliminare)
     match /appointments/{appointmentId} {
       allow read: if isAdminOrDipendente();
-      allow create: if isAdmin();
-      allow update: if isAdmin();
+      allow create: if isAdminOrDipendente();
+      allow update: if isAdminOrDipendente();
       allow delete: if isAdmin();
     }
 

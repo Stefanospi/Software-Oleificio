@@ -7,9 +7,57 @@ import {
   updateDoc, 
   deleteDoc,
   query,
-  where
+  where,
+  onSnapshot,
+  type Unsubscribe,
 } from "firebase/firestore";
 import type { Customer, Bin, Batch, Weighing, Milling, Container } from "../types";
+
+// ─── SOTTOSCRIZIONI REAL-TIME ──────────────────────────────────────────────────
+const subscribeCollection = <T>(
+  name: string,
+  callback: (items: T[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe =>
+  onSnapshot(
+    collection(db, name),
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as T))),
+    (err) => {
+      console.error(`Errore sottoscrizione ${name}:`, err);
+      onError?.(err);
+    }
+  );
+
+export const subscribeCustomers = (cb: (items: Customer[]) => void, onError?: (e: Error) => void) =>
+  subscribeCollection<Customer>("customers", cb, onError);
+
+export const subscribeBins = (cb: (items: Bin[]) => void, onError?: (e: Error) => void) =>
+  subscribeCollection<Bin>("bins", (list) => cb(sortBins(list)), onError);
+
+export const subscribeBatches = (cb: (items: Batch[]) => void, onError?: (e: Error) => void) =>
+  subscribeCollection<Batch>("batches", (list) => cb(sortBatches(list)), onError);
+
+export const subscribeWeighings = (cb: (items: Weighing[]) => void, onError?: (e: Error) => void) =>
+  subscribeCollection<Weighing>("weighings", cb, onError);
+
+export const subscribeMillings = (cb: (items: Milling[]) => void, onError?: (e: Error) => void) =>
+  subscribeCollection<Milling>("millings", cb, onError);
+
+export const subscribeContainers = (cb: (items: Container[]) => void, onError?: (e: Error) => void) =>
+  subscribeCollection<Container>("containers", cb, onError);
+
+const sortBins = (list: Bin[]) =>
+  [...list].sort((a, b) =>
+    (a.identifier || "").localeCompare(b.identifier || "", undefined, { numeric: true, sensitivity: "base" })
+  );
+
+// Le partite più recenti per prime (i timestamp pendenti sono null in locale)
+const sortBatches = (list: Batch[]) =>
+  [...list].sort((a, b) => {
+    const ta = a.createdAt?.toMillis?.() ?? Number.MAX_SAFE_INTEGER;
+    const tb = b.createdAt?.toMillis?.() ?? Number.MAX_SAFE_INTEGER;
+    return tb - ta;
+  });
 
 // Helper: rimuove qualsiasi campo con valore undefined che manderebbe in errore Firestore SDK
 const sanitizeData = <T extends Record<string, unknown>>(data: T): Partial<T> => {

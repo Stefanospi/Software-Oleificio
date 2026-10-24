@@ -7,7 +7,7 @@ import {
   Scale, Gauge, Layers, Award,
 } from "lucide-react";
 import { useState, useEffect, useMemo, Fragment } from "react";
-import { getCustomers, addCustomer, updateCustomer, deleteCustomer } from "@/lib/db";
+import { subscribeCustomers, addCustomer, updateCustomer, deleteCustomer } from "@/lib/db";
 import { Modal } from "@/components/Modal";
 import { useAuth } from "@/context/AuthContext";
 import { generateDichiarazione } from "@/lib/pdfService";
@@ -54,18 +54,12 @@ export default function ClientiPage() {
   const [millingSummary, setMillingSummary] = useState<MillingSummary | null>(null);
   const [loadingMilling, setLoadingMilling] = useState(false);
 
-  useEffect(() => { fetchClienti(); }, []);
-
-  const fetchClienti = async () => {
-    try {
-      const data = await getCustomers();
-      setClienti(data);
-    } catch (error) {
-      console.error("Errore nel caricamento clienti:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    return subscribeCustomers(
+      (data) => { setClienti(data); setLoading(false); },
+      () => setLoading(false)
+    );
+  }, []);
 
   const openNew = () => {
     setEditingId(null);
@@ -141,7 +135,6 @@ export default function ClientiPage() {
         ).catch((err) => console.error("Errore notifica nuovo cliente:", err));
       }
       setModalOpen(false);
-      await fetchClienti();
     } catch (e: any) {
       console.error("Errore salvataggio cliente:", e);
       setFormError(e?.message || "Errore durante il salvataggio dei dati.");
@@ -171,7 +164,6 @@ export default function ClientiPage() {
   const handleDelete = async (id: string) => {
     try {
       await deleteCustomer(id);
-      await fetchClienti();
     } finally {
       setDeleteConfirmId(null);
     }
@@ -232,12 +224,10 @@ export default function ClientiPage() {
             {clienti.length} clienti registrati
           </p>
         </div>
-        {isAdmin && (
-          <button className="btn-primary" onClick={openNew}>
-            <Plus size={17} />
-            Nuovo Cliente
-          </button>
-        )}
+        <button className="btn-primary" onClick={openNew}>
+          <Plus size={17} />
+          Nuovo Cliente
+        </button>
       </div>
 
       {/* Filtri */}

@@ -16,21 +16,32 @@ import {
   Trash2,
 } from "lucide-react";
 import {
-  getAllAppointments,
+  subscribeAppointments,
   addAppointment,
   updateAppointmentStatus,
   deleteAppointment,
 } from "@/lib/agendaService";
-import { getCustomers } from "@/lib/db";
+import { subscribeCustomers } from "@/lib/db";
 import { useAuth } from "@/context/AuthContext";
 import type { Appointment, AppointmentStatus, AppointmentType, Customer } from "@/types";
 import { Timestamp } from "firebase/firestore";
 
+// Data locale in formato YYYY-MM-DD (toISOString userebbe UTC e sfaserebbe il giorno)
+const toLocalDateStr = (d: Date) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+// Interpreta YYYY-MM-DD come data locale
+const parseLocalDate = (s: string) => {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+};
+
 export default function AgendaPage() {
-  const { user } = useAuth();
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
+  const { user, isAdmin } = useAuth();
+  const [selectedDate, setSelectedDate] = useState<string>(toLocalDateStr(new Date()));
+  const [error, setError] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,24 +55,13 @@ export default function AgendaPage() {
   const [formNotes, setFormNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [apptList, custList] = await Promise.all([
-        getAllAppointments(),
-        getCustomers(),
-      ]);
-      setAppointments(apptList);
-      setCustomers(custList);
-    } catch (err) {
-      console.error("Errore caricamento agenda:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadData();
+    const unsubAppts = subscribeAppointments(
+      (list) => { setAppointments(list); setLoading(false); setError(null); },
+      (err) => { setLoading(false); setError(`Impossibile caricare l'agenda: ${err.message}`); }
+    );
+    const unsubCustomers = subscribeCustomers(setCustomers);
+    return () => { unsubAppts(); unsubCustomers(); };
   }, []);
 
   // Filtra appuntamenti per la data selezionata (YYYY-MM-DD)
@@ -69,17 +69,16 @@ export default function AgendaPage() {
     if (!a.startDate) return false;
     try {
       const d = a.startDate.toDate ? a.startDate.toDate() : new Date(a.startDate as any);
-      const dateStr = d.toISOString().split("T")[0];
-      return dateStr === selectedDate;
+      return toLocalDateStr(d) === selectedDate;
     } catch {
       return false;
     }
   });
 
   const changeDateBy = (days: number) => {
-    const current = new Date(selectedDate);
+    const current = parseLocalDate(selectedDate);
     current.setDate(current.getDate() + days);
-    setSelectedDate(current.toISOString().split("T")[0]);
+    setSelectedDate(toLocalDateStr(current));
   };
 
   const handleCreateAppointment = async (e: React.FormEvent) => {
@@ -90,12 +89,12 @@ export default function AgendaPage() {
 
     try {
       setSaving(true);
+      setError(null);
       const [hours, minutes] = formTime.split(":").map(Number);
-      const start = new Date(selectedDate);
-      start.setHours(hours || 9, minutes || 0, 0, 0);
+      const start = parseLocalDate(selectedDate);
+      start.setHours(Number.isNaN(hours) ? 9 : hours, Number.isNaN(minutes) ? 0 : minutes, 0, 0);
 
-      const end = new Date(start);
-      end.setHours(start.getHours() + 1);
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
 
       await addAppointment({
         customerId: selectedCustomer.id!,
@@ -114,9 +113,9 @@ export default function AgendaPage() {
       setFormCustomerId("");
       setFormEstimatedKg("");
       setFormNotes("");
-      await loadData();
     } catch (err) {
       console.error("Errore creazione appuntamento:", err);
+      setError(`Errore durante il salvataggio dell'appuntamento: ${err instanceof Error ? err.message : "riprova"}`);
     } finally {
       setSaving(false);
     }
@@ -124,16 +123,24 @@ export default function AgendaPage() {
 
   const handleStatusChange = async (id?: string, status?: AppointmentStatus) => {
     if (!id || !status) return;
-    await updateAppointmentStatus(id, status);
-    setAppointments((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, status } : a))
-    );
+    try {
+      setError(null);
+      await updateAppointmentStatus(id, status);
+    } catch (err) {
+      console.error("Errore aggiornamento stato:", err);
+      setError("Impossibile aggiornare lo stato dell'appuntamento.");
+    }
   };
 
   const handleDelete = async (id?: string) => {
     if (!id || !confirm("Sei sicuro di voler eliminare questo appuntamento?")) return;
-    await deleteAppointment(id);
-    setAppointments((prev) => prev.filter((a) => a.id !== id));
+    try {
+      setError(null);
+      await deleteAppointment(id);
+    } catch (err) {
+      console.error("Errore eliminazione appuntamento:", err);
+      setError("Impossibile eliminare l'appuntamento.");
+    }
   };
 
   const getStatusBadge = (status: AppointmentStatus) => {
@@ -162,7 +169,7 @@ export default function AgendaPage() {
     }
   };
 
-  const isToday = selectedDate === new Date().toISOString().split("T")[0];
+  const isToday = selectedDate === toLocalDateStr(new Date());
 
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto", paddingBottom: 60 }}>
@@ -281,7 +288,7 @@ export default function AgendaPage() {
 
           {!isToday && (
             <button
-              onClick={() => setSelectedDate(new Date().toISOString().split("T")[0])}
+              onClick={() => setSelectedDate(toLocalDateStr(new Date()))}
               style={{
                 fontSize: 12,
                 fontWeight: 600,
@@ -305,6 +312,12 @@ export default function AgendaPage() {
           </strong>
         </div>
       </div>
+
+      {error && (
+        <div style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 8, background: "#FEE2E2", color: "#B91C1C", fontSize: 13, border: "1px solid #FCA5A5" }}>
+          {error}
+        </div>
+      )}
 
       {/* Lista Appuntamenti del Giorno */}
       {loading ? (
@@ -450,7 +463,7 @@ export default function AgendaPage() {
                       In corso
                     </button>
                   )}
-                  <button
+                  {isAdmin && <button
                     onClick={() => handleDelete(item.id)}
                     title="Elimina"
                     style={{
@@ -462,7 +475,7 @@ export default function AgendaPage() {
                     }}
                   >
                     <Trash2 size={16} />
-                  </button>
+                  </button>}
                 </div>
               </div>
             );

@@ -1,28 +1,68 @@
 "use client";
 
-import { Plus, Scale, Droplet, Loader2, Trash2, ChevronDown, ChevronUp, AlertTriangle, Pencil, UserRound, Box } from "lucide-react";
+import { Plus, Scale, Droplet, Loader2, Trash2, ChevronDown, ChevronUp, AlertTriangle, Pencil, UserRound, Box, X, Search } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
+import { deleteField } from "firebase/firestore";
 import {
-  getBatches, addBatch, updateBatch, deleteBatch,
-  getCustomers,
-  getWeighingsForBatch, addWeighing, updateWeighing, deleteWeighing,
-  getMillingForBatch, addMilling, updateBatchStatus,
-  getBins, updateBinStatus,
+  addBatch, updateBatch, deleteBatch,
+  subscribeBatches, subscribeCustomers, subscribeBins, subscribeWeighings, subscribeMillings,
+  addWeighing, updateWeighing, deleteWeighing,
+  addMilling, updateBatchStatus,
+  updateBinStatus,
 } from "@/lib/db";
 import { Modal } from "@/components/Modal";
 import { useAuth } from "@/context/AuthContext";
 import { addNotification, buildNotification } from "@/lib/notificationService";
 import type { Batch, Customer, Weighing, Milling, Bin } from "@/types";
 
+// Vista unificata della pesata di una partita: la pesata è unica (peso totale),
+// i bins sono solo associati. Le vecchie pesate per singolo bin vengono accorpate.
+interface BatchWeighing {
+  primary?: Weighing;
+  all: Weighing[];
+  totalKg: number;
+  hasWeight: boolean;
+  binIds: string[];
+  customerBinNotes: string;
+}
+
+const buildBatchWeighing = (list: Weighing[]): BatchWeighing => {
+  const sorted = [...list].sort(
+    (a, b) => (a.createdAt?.toMillis?.() ?? 0) - (b.createdAt?.toMillis?.() ?? 0)
+  );
+  const binIds = new Set<string>();
+  const notes: string[] = [];
+  let totalKg = 0;
+  let hasWeight = false;
+  for (const w of sorted) {
+    if (typeof w.weightKg === "number" && w.weightKg > 0) {
+      totalKg += w.weightKg;
+      hasWeight = true;
+    }
+    (w.binIds ?? (w.binId ? [w.binId] : [])).forEach((id) => binIds.add(id));
+    const note = w.customerBinNotes || (w.isCustomerBin ? w.binIdentifier : "");
+    if (note && !notes.includes(note)) notes.push(note);
+  }
+  return {
+    primary: sorted[0],
+    all: sorted,
+    totalKg,
+    hasWeight,
+    binIds: [...binIds],
+    customerBinNotes: notes.join(", "),
+  };
+};
+
+const EMPTY_BATCH_WEIGHING = buildBatchWeighing([]);
+
 export default function PartitePage() {
   const { loading: authLoading, user, profile, isAdmin } = useAuth();
   const [partite, setPartite] = useState<Batch[]>([]);
   const [clienti, setClienti] = useState<Customer[]>([]);
-  const [clientiMap, setClientiMap] = useState<Record<string, Customer>>({});
   const [bins, setBins] = useState<Bin[]>([]);
-  const [weighingsMap, setWeighingsMap] = useState<Record<string, Weighing[]>>({});
-  const [millingsMap, setMillingsMap] = useState<Record<string, Milling>>({});
-  const [loading, setLoading] = useState(true);
+  const [allWeighings, setAllWeighings] = useState<Weighing[]>([]);
+  const [allMillings, setAllMillings] = useState<Milling[]>([]);
+  const [ready, setReady] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // ── Modal nuova partita ──
@@ -38,16 +78,17 @@ export default function PartitePage() {
   const [deletePartitaId, setDeletePartitaId] = useState<string | null>(null);
   const [deletingPartita, setDeletingPartita] = useState(false);
 
-  // ── Modal pesata (nuova o modifica) ──
-  const [pesataModal, setPesataModal] = useState<{ mode: "new" | "edit"; batchId: string; weighing?: Weighing } | null>(null);
+  // ── Modal pesata unica + bins ──
+  const [pesataBatchId, setPesataBatchId] = useState<string | null>(null);
   const [pesataKg, setPesataKg] = useState("");
-  const [pesataBinId, setPesataBinId] = useState("");
-  const [pesataBinType, setPesataBinType] = useState<"oleificio" | "cliente" | "sfuso">("oleificio");
+  const [pesataBinIds, setPesataBinIds] = useState<string[]>([]);
   const [pesataCustomerBinDesc, setPesataCustomerBinDesc] = useState("");
+  const [binSearch, setBinSearch] = useState("");
   const [savingPesata, setSavingPesata] = useState(false);
+  const [pesataError, setPesataError] = useState<string | null>(null);
 
   // ── Elimina pesata ──
-  const [deleteWeighingId, setDeleteWeighingId] = useState<string | null>(null);
+  const [deleteWeighingBatchId, setDeleteWeighingBatchId] = useState<string | null>(null);
 
   // ── Modal molitura ──
   const [showMolitura, setShowMolitura] = useState(false);
@@ -57,40 +98,52 @@ export default function PartitePage() {
   const [molituraPomacePerc, setMolituraPomacePerc] = useState("40");
   const [savingMolitura, setSavingMolitura] = useState(false);
 
+  // Sottoscrizioni real-time: ogni modifica si riflette subito senza ricaricare
   useEffect(() => {
     if (authLoading || !user) return;
-    fetchDati();
+    const mark = (key: string) => setReady((r) => (r[key] ? r : { ...r, [key]: true }));
+    const unsubs = [
+      subscribeBatches((v) => { setPartite(v); mark("batches"); }, () => mark("batches")),
+      subscribeCustomers((v) => { setClienti(v); mark("customers"); }, () => mark("customers")),
+      subscribeBins((v) => { setBins(v); mark("bins"); }, () => mark("bins")),
+      subscribeWeighings((v) => { setAllWeighings(v); mark("weighings"); }, () => mark("weighings")),
+      subscribeMillings((v) => { setAllMillings(v); mark("millings"); }, () => mark("millings")),
+    ];
+    return () => unsubs.forEach((u) => u());
   }, [authLoading, user]);
 
-  const fetchDati = async () => {
-    setLoading(true);
-    try {
-      const [partiteData, clientiData, binsData] = await Promise.all([getBatches(), getCustomers(), getBins()]);
-      const cMap: Record<string, Customer> = {};
-      clientiData.forEach(c => { if (c.id) cMap[c.id] = c; });
-      setClientiMap(cMap);
-      setClienti(clientiData);
-      setBins(binsData);
-      setPartite(partiteData);
+  const loading = !(ready.batches && ready.customers && ready.bins && ready.weighings && ready.millings);
 
-      const wMap: Record<string, Weighing[]> = {};
-      const mMap: Record<string, Milling> = {};
-      for (const p of partiteData) {
-        if (!p.id) continue;
-        wMap[p.id] = await getWeighingsForBatch(p.id);
-        if (p.status === "CLOSED") {
-          const mData = await getMillingForBatch(p.id);
-          if (mData) mMap[p.id] = mData;
-        }
-      }
-      setWeighingsMap(wMap);
-      setMillingsMap(mMap);
-    } catch (e) {
-      console.error("Errore caricamento:", e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const clientiMap = useMemo(() => {
+    const m: Record<string, Customer> = {};
+    clienti.forEach((c) => { if (c.id) m[c.id] = c; });
+    return m;
+  }, [clienti]);
+
+  const binsMap = useMemo(() => {
+    const m: Record<string, Bin> = {};
+    bins.forEach((b) => { if (b.id) m[b.id] = b; });
+    return m;
+  }, [bins]);
+
+  const weighingByBatch = useMemo(() => {
+    const grouped: Record<string, Weighing[]> = {};
+    allWeighings.forEach((w) => { (grouped[w.batchId] ||= []).push(w); });
+    const result: Record<string, BatchWeighing> = {};
+    Object.entries(grouped).forEach(([id, list]) => { result[id] = buildBatchWeighing(list); });
+    return result;
+  }, [allWeighings]);
+
+  const millingsMap = useMemo(() => {
+    const m: Record<string, Milling> = {};
+    allMillings.forEach((x) => { m[x.batchId] = x; });
+    return m;
+  }, [allMillings]);
+
+  const getBW = (batchId?: string) => (batchId && weighingByBatch[batchId]) || EMPTY_BATCH_WEIGHING;
+
+  const releaseBins = (ids: string[]) =>
+    Promise.all(ids.map((id) => updateBinStatus(id, { status: "AVAILABLE", customerId: null, batchId: null })));
 
   // ── PARTITA: Crea ──
   const handleCreatePartita = async () => {
@@ -107,7 +160,6 @@ export default function PartitePage() {
       })).catch(() => {});
       setShowNuovaPartita(false);
       setNewClienteId("");
-      await fetchDati();
     } finally { setSavingPartita(false); }
   };
 
@@ -121,8 +173,11 @@ export default function PartitePage() {
     setSavingPartita(true);
     try {
       await updateBatch(editPartita.id, { customerId: editClienteId });
+      // I bins già associati seguono il nuovo cliente
+      await Promise.all(
+        getBW(editPartita.id).binIds.map((id) => updateBinStatus(id, { customerId: editClienteId }))
+      );
       setEditPartita(null);
-      await fetchDati();
     } finally { setSavingPartita(false); }
   };
 
@@ -130,129 +185,142 @@ export default function PartitePage() {
   const handleDeletePartita = async (id: string) => {
     setDeletingPartita(true);
     try {
-      // Elimina prima le pesate collegate e libera i rispettivi bins
-      const ws = weighingsMap[id] || [];
-      await Promise.all(
-        ws.map(async (w) => {
-          if (w.binId) {
-            await updateBinStatus(w.binId, { status: "AVAILABLE", customerId: null, batchId: null });
-          }
-          if (w.id) await deleteWeighing(w.id);
-        })
-      );
+      const bw = getBW(id);
+      await releaseBins(bw.binIds);
+      await Promise.all(bw.all.map((w) => (w.id ? deleteWeighing(w.id) : Promise.resolve())));
       await deleteBatch(id);
       setDeletePartitaId(null);
       if (expandedId === id) setExpandedId(null);
-      await fetchDati();
     } finally { setDeletingPartita(false); }
   };
 
+  // ── PESATA: salvataggio unico (peso totale opzionale + bins associati) ──
+  const persistBatchWeighing = async (
+    batchId: string,
+    kg: number | undefined,
+    binIds: string[],
+    customerBinNotes: string
+  ) => {
+    const partita = partite.find((p) => p.id === batchId);
+    if (!partita) return;
+    const bw = getBW(batchId);
+    const binIdentifiers = binIds.map((id) => binsMap[id]?.identifier).filter((x): x is string => !!x);
+    const removed = bw.binIds.filter((id) => !binIds.includes(id));
+    const added = binIds.filter((id) => !bw.binIds.includes(id));
+
+    await releaseBins(removed);
+    await Promise.all(
+      added.map((id) =>
+        updateBinStatus(id, { status: "LOADED", customerId: partita.customerId, batchId })
+      )
+    );
+
+    const payload = {
+      weightKg: kg ?? deleteField(),
+      binIds,
+      binIdentifiers,
+      customerBinNotes: customerBinNotes || deleteField(),
+      updatedAt: new Date(),
+    };
+
+    if (bw.primary?.id) {
+      // I campi della vecchia pesata per singolo bin vengono rimossi
+      await updateWeighing(bw.primary.id, {
+        ...payload,
+        binId: deleteField(),
+        binIdentifier: deleteField(),
+        isCustomerBin: deleteField(),
+        binType: deleteField(),
+      } as unknown as Partial<Weighing>);
+      // Eventuali pesate extra (modello precedente) sono già accorpate nella principale
+      await Promise.all(bw.all.slice(1).map((w) => (w.id ? deleteWeighing(w.id) : Promise.resolve())));
+    } else {
+      const wid = await addWeighing({
+        batchId,
+        weightKg: kg,
+        binIds,
+        binIdentifiers,
+        customerBinNotes: customerBinNotes || undefined,
+        createdByUid: user?.uid || "system",
+      });
+      const cliente = clientiMap[partita.customerId];
+      addNotification(buildNotification("new_weighing", user?.uid || "system", profile?.displayName || user?.email || "Dipendente", {
+        batchId,
+        weighingId: wid,
+        customerName: cliente ? `${cliente.firstName} ${cliente.lastName}` : "Cliente",
+        weightKg: kg,
+      })).catch(() => {});
+    }
+  };
+
   // ── PESATA: Apri modal ──
-  const openNuovaPesata = (batchId: string) => {
-    setPesataModal({ mode: "new", batchId });
-    setPesataKg("");
-    setPesataBinId("");
-    setPesataBinType("oleificio");
-    setPesataCustomerBinDesc("");
-  };
-  const openEditPesata = (batchId: string, w: Weighing) => {
-    setPesataModal({ mode: "edit", batchId, weighing: w });
-    setPesataKg(w.weightKg.toString());
-    const isCust = !!w.isCustomerBin;
-    const isLoose = !isCust && !w.binId;
-    setPesataBinType(isCust ? "cliente" : isLoose ? "sfuso" : "oleificio");
-    setPesataBinId(w.binId || "");
-    setPesataCustomerBinDesc(w.customerBinNotes || (isCust ? w.binIdentifier || "" : ""));
+  const openPesata = (batchId: string) => {
+    const bw = getBW(batchId);
+    setPesataBatchId(batchId);
+    setPesataKg(bw.hasWeight ? String(bw.totalKg) : "");
+    setPesataBinIds(bw.binIds);
+    setPesataCustomerBinDesc(bw.customerBinNotes);
+    setBinSearch("");
+    setPesataError(null);
   };
 
-  // ── PESATA: Salva (crea o modifica) ──
   const handleSavePesata = async () => {
-    if (!pesataModal) return;
-    const kg = parseFloat(pesataKg);
-    if (isNaN(kg) || kg <= 0) return;
+    if (!pesataBatchId) return;
+    const trimmed = pesataKg.trim().replace(",", ".");
+    const kg = trimmed === "" ? undefined : parseFloat(trimmed);
+    if (kg !== undefined && (isNaN(kg) || kg <= 0)) {
+      setPesataError("Il peso deve essere un numero maggiore di zero (oppure lascialo vuoto).");
+      return;
+    }
     setSavingPesata(true);
+    setPesataError(null);
     try {
-      const partita = partite.find(p => p.id === pesataModal.batchId);
-      const isCust = pesataBinType === "cliente";
-      const isLoose = pesataBinType === "sfuso";
-
-      const selectedBin = !isCust && !isLoose ? bins.find(b => b.id === pesataBinId) : null;
-      const finalBinId = !isCust && !isLoose ? (pesataBinId || undefined) : undefined;
-      const finalBinIdentifier = isCust
-        ? (pesataCustomerBinDesc.trim() || "Bin Cliente")
-        : selectedBin ? selectedBin.identifier : undefined;
-
-      if (pesataModal.mode === "new") {
-        const wid = await addWeighing({
-          batchId: pesataModal.batchId,
-          weightKg: kg,
-          binId: finalBinId,
-          binIdentifier: finalBinIdentifier,
-          isCustomerBin: isCust,
-          binType: pesataBinType,
-          customerBinNotes: isCust ? (pesataCustomerBinDesc.trim() || undefined) : undefined,
-          createdByUid: user?.uid || "system"
-        });
-
-        // Se è stato associato un bin dell'oleificio, aggiornalo a LOADED
-        if (finalBinId && partita) {
-          await updateBinStatus(finalBinId, {
-            status: "LOADED",
-            customerId: partita.customerId,
-            batchId: partita.id
-          });
-        }
-
-        const cliente = partita?.customerId ? clientiMap[partita.customerId] : null;
-        const clienteNome = cliente ? `${cliente.firstName} ${cliente.lastName}` : "Cliente";
-        addNotification(buildNotification("new_weighing", user?.uid || "system", profile?.displayName || user?.email || "Dipendente", {
-          batchId: pesataModal.batchId,
-          weighingId: wid,
-          customerName: clienteNome,
-          weightKg: kg,
-        })).catch(() => {});
-      } else if (pesataModal.weighing?.id) {
-        const oldBinId = pesataModal.weighing.binId;
-        // Se il bin dell'oleificio è cambiato o è diventato bin cliente/sfuso, libera il vecchio
-        if (oldBinId && oldBinId !== finalBinId) {
-          await updateBinStatus(oldBinId, { status: "AVAILABLE", customerId: null, batchId: null });
-        }
-        // Se è stato selezionato un nuovo bin dell'oleificio, occupalo
-        if (finalBinId && finalBinId !== oldBinId && partita) {
-          await updateBinStatus(finalBinId, {
-            status: "LOADED",
-            customerId: partita.customerId,
-            batchId: partita.id
-          });
-        }
-
-        await updateWeighing(pesataModal.weighing.id, {
-          weightKg: kg,
-          binId: finalBinId,
-          binIdentifier: finalBinIdentifier,
-          isCustomerBin: isCust,
-          binType: pesataBinType,
-          customerBinNotes: isCust ? (pesataCustomerBinDesc.trim() || undefined) : undefined,
-        });
-      }
-      setPesataModal(null);
-      setPesataKg("");
-      setPesataBinId("");
-      setPesataCustomerBinDesc("");
-      await fetchDati();
+      await persistBatchWeighing(pesataBatchId, kg, pesataBinIds, pesataCustomerBinDesc.trim());
+      setPesataBatchId(null);
+    } catch (err) {
+      console.error("Errore salvataggio pesata:", err);
+      setPesataError("Errore durante il salvataggio. Riprova.");
     } finally { setSavingPesata(false); }
   };
 
-  // ── PESATA: Elimina ──
-  const handleDeleteWeighing = async (w: Weighing) => {
-    if (!w.id) return;
-    if (w.binId) {
-      await updateBinStatus(w.binId, { status: "AVAILABLE", customerId: null, batchId: null });
-    }
-    await deleteWeighing(w.id);
-    setDeleteWeighingId(null);
-    await fetchDati();
+  // ── BIN: rimuovi da una partita (libera subito il bin) ──
+  const handleRemoveBinFromBatch = async (batchId: string, binId: string) => {
+    const bw = getBW(batchId);
+    await persistBatchWeighing(
+      batchId,
+      bw.hasWeight ? bw.totalKg : undefined,
+      bw.binIds.filter((id) => id !== binId),
+      bw.customerBinNotes
+    );
   };
+
+  // ── PESATA: Elimina ──
+  const handleDeleteWeighing = async (batchId: string) => {
+    const bw = getBW(batchId);
+    await releaseBins(bw.binIds);
+    await Promise.all(bw.all.map((w) => (w.id ? deleteWeighing(w.id) : Promise.resolve())));
+    setDeleteWeighingBatchId(null);
+  };
+
+  // Bins selezionabili per la partita nel modal
+  const selectableBins = useMemo(() => {
+    const batch = partite.find((p) => p.id === pesataBatchId);
+    if (!batch) return [];
+    const q = binSearch.trim().toLowerCase();
+    const rank = (b: Bin) => (pesataBinIds.includes(b.id!) ? 0 : b.customerId === batch.customerId && b.status === "PICKED_UP" ? 1 : 2);
+    return bins
+      .filter((b) => {
+        if (!b.id) return false;
+        if (pesataBinIds.includes(b.id)) return true;
+        const mine = b.customerId && b.customerId === batch.customerId;
+        const free = b.status === "AVAILABLE" || ((b.status === "PICKED_UP" || b.status === "RESERVED") && mine);
+        return free && (!q || (b.identifier || "").toLowerCase().includes(q));
+      })
+      .sort((a, b) => rank(a) - rank(b));
+  }, [bins, partite, pesataBatchId, pesataBinIds, binSearch]);
+
+  const toggleBin = (id: string) =>
+    setPesataBinIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   // ── MOLITURA ──
   const handleEseguiMolitura = async () => {
@@ -262,8 +330,8 @@ export default function PartitePage() {
     if (isNaN(litri) || !selectedBatchId) return;
     setSavingMolitura(true);
     try {
-      const weighings = weighingsMap[selectedBatchId] || [];
-      const totalOlivesKg = weighings.reduce((acc, w) => acc + w.weightKg, 0);
+      const bw = getBW(selectedBatchId);
+      const totalOlivesKg = bw.totalKg;
       const density = 0.916;
       const oilWeightKg = litri * density;
       const yieldPercentage = totalOlivesKg > 0 ? (oilWeightKg / totalOlivesKg) * 100 : 0;
@@ -284,11 +352,7 @@ export default function PartitePage() {
       await updateBatchStatus(selectedBatchId, "CLOSED");
 
       // Libera i bins utilizzati da questa partita (olive versate nel frantoio)
-      await Promise.all(
-        weighings
-          .filter(w => w.binId)
-          .map(w => updateBinStatus(w.binId!, { status: "AVAILABLE", customerId: null, batchId: null }))
-      );
+      await releaseBins(bw.binIds);
 
       const partita = partite.find(p => p.id === selectedBatchId);
       const cliente = partita?.customerId ? clientiMap[partita.customerId] : null;
@@ -299,7 +363,6 @@ export default function PartitePage() {
       })).catch(() => {});
       setShowMolitura(false);
       setMolituraLiters("");
-      await fetchDati();
     } finally { setSavingMolitura(false); }
   };
 
@@ -309,8 +372,7 @@ export default function PartitePage() {
     const waterPerc = parseFloat(molituraWaterPerc);
     const pomacePerc = parseFloat(molituraPomacePerc);
     if (isNaN(litri) || litri <= 0 || !selectedBatchId) return null;
-    const weighings = weighingsMap[selectedBatchId] || [];
-    const totalOlivesKg = weighings.reduce((acc, w) => acc + w.weightKg, 0);
+    const totalOlivesKg = (weighingByBatch[selectedBatchId] || EMPTY_BATCH_WEIGHING).totalKg;
     const density = 0.916;
     const oilWeightKg = litri * density;
     const yieldPercentage = totalOlivesKg > 0 ? (oilWeightKg / totalOlivesKg) * 100 : 0;
@@ -323,7 +385,7 @@ export default function PartitePage() {
       pomaceKg: (wasteKg * (pomacePerc / 100)).toFixed(2),
       wasteKg: wasteKg.toFixed(2),
     };
-  }, [molituraLiters, molituraWaterPerc, molituraPomacePerc, selectedBatchId, weighingsMap]);
+  }, [molituraLiters, molituraWaterPerc, molituraPomacePerc, selectedBatchId, weighingByBatch]);
 
   return (
     <div style={{ maxWidth: "100%", margin: "0 auto" }}>
@@ -353,8 +415,7 @@ export default function PartitePage() {
           {partite.map(partita => {
             const cliente = partita.customerId ? clientiMap[partita.customerId] : null;
             const nomeCliente = cliente ? `${cliente.firstName} ${cliente.lastName}` : "Cliente Sconosciuto";
-            const weighings = partita.id ? weighingsMap[partita.id] || [] : [];
-            const totalOlive = weighings.reduce((acc, w) => acc + w.weightKg, 0);
+            const bw = getBW(partita.id);
             const milling = partita.id ? millingsMap[partita.id] : null;
             const isOpen = partita.status === "OPEN";
             const isExpanded = expandedId === partita.id;
@@ -389,7 +450,7 @@ export default function PartitePage() {
                           ? partita.createdAt.toDate().toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" })
                           : "Data N/D"
                         }
-                        {" · "}{weighings.length} pesate · {totalOlive.toLocaleString("it-IT")} kg
+                        {" · "}{bw.binIds.length} bins · {bw.hasWeight ? `${bw.totalKg.toLocaleString("it-IT")} kg` : "peso n/d"}
                         {milling ? ` · ${milling.producedOilLiters} L olio` : ""}
                       </div>
                     </div>
@@ -416,7 +477,7 @@ export default function PartitePage() {
                       {isAdmin && (
                         deletePartitaId === partita.id ? (
                           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            <span style={{ fontSize: 13, color: "var(--red-text)" }}>Eliminare la partita e tutte le pesate?</span>
+                            <span style={{ fontSize: 13, color: "var(--red-text)" }}>Eliminare la partita e la pesata?</span>
                             <button className="btn-danger" disabled={deletingPartita} onClick={() => handleDeletePartita(partita.id!)} style={{ padding: "6px 12px", fontSize: 12 }}>
                               {deletingPartita ? <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} /> : "Sì, elimina"}
                             </button>
@@ -437,18 +498,18 @@ export default function PartitePage() {
                           <Scale size={12} /> Totale Olive
                         </div>
                         <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>
-                          {totalOlive.toLocaleString("it-IT")} <span style={{ fontSize: 13, fontWeight: 400, color: "var(--text-muted)" }}>kg</span>
+                          {bw.hasWeight ? bw.totalKg.toLocaleString("it-IT") : "—"} <span style={{ fontSize: 13, fontWeight: 400, color: "var(--text-muted)" }}>kg</span>
                         </div>
                         <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                          <span>{weighings.length} pesate</span>
-                          {weighings.filter(w => w.isCustomerBin).length > 0 && (
+                          {!bw.hasWeight && <span>Peso non ancora registrato</span>}
+                          {bw.customerBinNotes && (
                             <span className="badge badge-yellow" style={{ fontSize: 10, padding: "1px 5px" }}>
-                              🚜 {weighings.filter(w => w.isCustomerBin).length} Bins Cliente da restituire
+                              🚜 Bins Cliente da restituire
                             </span>
                           )}
-                          {weighings.filter(w => !w.isCustomerBin && w.binId).length > 0 && (
+                          {bw.binIds.length > 0 && (
                             <span className="badge badge-olive" style={{ fontSize: 10, padding: "1px 5px" }}>
-                              🏢 {weighings.filter(w => !w.isCustomerBin && w.binId).length} Bins Oleificio
+                              🏢 {bw.binIds.length} Bins Oleificio
                             </span>
                           )}
                         </div>
@@ -479,58 +540,65 @@ export default function PartitePage() {
                       )}
                     </div>
 
-                    {/* Lista pesate */}
+                    {/* Pesata unica e bins */}
                     <div style={{ marginBottom: 18 }}>
                       <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: 10 }}>
-                        Dettaglio Pesate
+                        Pesata e Bins
                       </div>
-                      {weighings.length === 0 ? (
+                      {!bw.primary ? (
                         <p style={{ fontSize: 13, color: "var(--text-muted)", fontStyle: "italic" }}>Nessuna pesata registrata.</p>
                       ) : (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                          {weighings.map((w, i) => (
-                            <div key={w.id} style={{
-                              display: "flex", alignItems: "center", gap: 8,
-                              padding: "7px 12px", borderRadius: "var(--radius-sm)",
-                              backgroundColor: "var(--surface)", border: "1px solid var(--border)", fontSize: 13,
-                            }}>
-                              <span style={{ color: "var(--text-muted)", fontSize: 11 }}>#{i + 1}</span>
-                              {w.isCustomerBin ? (
-                                <span className="badge badge-yellow" style={{ fontSize: 11, padding: "2px 7px", display: "inline-flex", alignItems: "center", gap: 4 }} title="Bin di proprietà del cliente (da restituire)">
-                                  <UserRound size={11} />
-                                  {w.binIdentifier || "Bin Cliente"}
-                                </span>
-                              ) : w.binId || w.binIdentifier ? (
-                                <span className="badge badge-olive" style={{ fontSize: 11, padding: "2px 7px", display: "inline-flex", alignItems: "center", gap: 4 }} title="Bin aziendale dell'oleificio">
-                                  <Box size={11} />
-                                  {w.binIdentifier || "Bin Oleificio"}
-                                </span>
-                              ) : (
-                                <span className="badge badge-gray" style={{ fontSize: 11, padding: "2px 7px" }} title="Olive sfuse o in sacchi">
-                                  Sfuso
-                                </span>
-                              )}
-                              <span style={{ fontWeight: 600 }}>{w.weightKg.toLocaleString("it-IT")} kg</span>
-                              {/* Modifica e elimina pesata */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "12px 14px", borderRadius: "var(--radius-sm)", backgroundColor: "var(--surface)", border: "1px solid var(--border)", fontSize: 13 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                            <Scale size={14} color="var(--accent)" />
+                            <span style={{ fontWeight: 700 }}>
+                              {bw.hasWeight ? `${bw.totalKg.toLocaleString("it-IT")} kg` : "Peso non ancora registrato"}
+                            </span>
+                            {isOpen && (
                               <button
-                                onClick={() => openEditPesata(partita.id!, w)}
-                                style={{ marginLeft: 4, background: "none", border: "none", cursor: "pointer", color: "var(--accent)", display: "flex", alignItems: "center" }}
+                                onClick={() => openPesata(partita.id!)}
+                                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--accent)", display: "flex", alignItems: "center" }}
                                 title="Modifica pesata"
                               >
                                 <Pencil size={12} />
                               </button>
-                              {deleteWeighingId === w.id ? (
-                                <>
-                                  <button onClick={() => handleDeleteWeighing(w)} style={{ fontSize: 11, color: "var(--red-text)", fontWeight: 700, background: "none", border: "none", cursor: "pointer" }}>Elimina</button>
-                                  <button onClick={() => setDeleteWeighingId(null)} style={{ fontSize: 11, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer" }}>✕</button>
-                                </>
-                              ) : (
-                                <button onClick={() => setDeleteWeighingId(w.id!)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", display: "flex", alignItems: "center" }} title="Elimina pesata">
-                                  <Trash2 size={12} />
-                                </button>
+                            )}
+                            {isOpen && (deleteWeighingBatchId === partita.id ? (
+                              <>
+                                <button onClick={() => handleDeleteWeighing(partita.id!)} style={{ fontSize: 11, color: "var(--red-text)", fontWeight: 700, background: "none", border: "none", cursor: "pointer" }}>Elimina</button>
+                                <button onClick={() => setDeleteWeighingBatchId(null)} style={{ fontSize: 11, color: "var(--text-muted)", background: "none", border: "none", cursor: "pointer" }}>✕</button>
+                              </>
+                            ) : (
+                              <button onClick={() => setDeleteWeighingBatchId(partita.id!)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", display: "flex", alignItems: "center" }} title="Elimina pesata">
+                                <Trash2 size={12} />
+                              </button>
+                            ))}
+                          </div>
+                          {(bw.binIds.length > 0 || bw.customerBinNotes) && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                              {bw.binIds.map((id) => (
+                                <span key={id} className="badge badge-olive" style={{ fontSize: 11, padding: "2px 7px", display: "inline-flex", alignItems: "center", gap: 4 }} title="Bin dell'oleificio">
+                                  <Box size={11} />
+                                  {binsMap[id]?.identifier || "Bin"}
+                                  {isOpen && (
+                                    <button
+                                      onClick={() => handleRemoveBinFromBatch(partita.id!, id)}
+                                      style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", display: "flex", padding: 0 }}
+                                      title="Rimuovi bin dalla partita"
+                                    >
+                                      <X size={11} />
+                                    </button>
+                                  )}
+                                </span>
+                              ))}
+                              {bw.customerBinNotes && (
+                                <span className="badge badge-yellow" style={{ fontSize: 11, padding: "2px 7px", display: "inline-flex", alignItems: "center", gap: 4 }} title="Bins del cliente (da restituire)">
+                                  <UserRound size={11} />
+                                  {bw.customerBinNotes}
+                                </span>
                               )}
                             </div>
-                          ))}
+                          )}
                         </div>
                       )}
                     </div>
@@ -538,14 +606,14 @@ export default function PartitePage() {
                     {/* Azioni (solo partita aperta) */}
                     {isOpen && (
                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        <button className="btn-secondary" onClick={() => openNuovaPesata(partita.id!)}>
-                          <Scale size={15} /> + Aggiungi Pesata
+                        <button className="btn-secondary" onClick={() => openPesata(partita.id!)}>
+                          <Scale size={15} /> {bw.primary ? "Modifica Pesata e Bins" : "Registra Pesata e Bins"}
                         </button>
                         <button
                           className="btn-primary"
                           onClick={() => { setSelectedBatchId(partita.id!); setShowMolitura(true); }}
-                          disabled={weighings.length === 0}
-                          title={weighings.length === 0 ? "Aggiungi almeno una pesata prima" : ""}
+                          disabled={!bw.hasWeight}
+                          title={!bw.hasWeight ? "Registra prima il peso totale della pesata" : ""}
                         >
                           <Droplet size={15} /> Calcola Molitura
                         </button>
@@ -606,125 +674,92 @@ export default function PartitePage() {
         </div>
       </Modal>
 
-      {/* ── MODAL Pesata (nuova o modifica) ── */}
+      {/* ── MODAL Pesata unica + Bins ── */}
       <Modal
-        isOpen={!!pesataModal}
-        onClose={() => setPesataModal(null)}
-        title={pesataModal?.mode === "edit" ? "Modifica Pesata" : "Aggiungi Pesata"}
-        size="sm"
+        isOpen={!!pesataBatchId}
+        onClose={() => setPesataBatchId(null)}
+        title={pesataBatchId && getBW(pesataBatchId).primary ? "Modifica Pesata e Bins" : "Registra Pesata e Bins"}
+        size="md"
         footer={
           <>
-            <button className="btn-secondary" onClick={() => setPesataModal(null)}>Annulla</button>
-            <button className="btn-primary" onClick={handleSavePesata} disabled={savingPesata || !pesataKg}>
+            <button className="btn-secondary" onClick={() => setPesataBatchId(null)}>Annulla</button>
+            <button className="btn-primary" onClick={handleSavePesata} disabled={savingPesata}>
               {savingPesata && <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />}
-              {pesataModal?.mode === "edit" ? "Salva Modifica" : "Aggiungi"}
+              Salva
             </button>
           </>
         }
       >
-        {/* Tipo di Contenitore / Bin */}
         <div className="form-group">
-          <label style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 8 }}>
-            <Box size={14} color="var(--accent)" />
-            Tipo Contenitore Olive *
-          </label>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 10 }}>
-            <button
-              type="button"
-              className={pesataBinType === "oleificio" ? "btn-primary" : "btn-secondary"}
-              style={{ padding: "7px 4px", fontSize: 11, justifyContent: "center", textAlign: "center" }}
-              onClick={() => setPesataBinType("oleificio")}
-            >
-              🏢 Oleificio
-            </button>
-            <button
-              type="button"
-              className={pesataBinType === "cliente" ? "btn-primary" : "btn-secondary"}
-              style={{
-                padding: "7px 4px", fontSize: 11, justifyContent: "center", textAlign: "center",
-                background: pesataBinType === "cliente" ? "#D97706" : undefined,
-                borderColor: pesataBinType === "cliente" ? "#D97706" : undefined,
-                color: pesataBinType === "cliente" ? "#fff" : undefined,
-              }}
-              onClick={() => setPesataBinType("cliente")}
-            >
-              🚜 Del Cliente
-            </button>
-            <button
-              type="button"
-              className={pesataBinType === "sfuso" ? "btn-primary" : "btn-secondary"}
-              style={{ padding: "7px 4px", fontSize: 11, justifyContent: "center", textAlign: "center" }}
-              onClick={() => setPesataBinType("sfuso")}
-            >
-              📦 Sfuso / Sacchi
-            </button>
-          </div>
-
-          {/* Dettaglio se Bin Oleificio */}
-          {pesataBinType === "oleificio" && (
-            <div>
-              <label style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 4, display: "block" }}>
-                Seleziona Cassone dell&apos;Oleificio
-              </label>
-              <select
-                value={pesataBinId}
-                onChange={(e) => setPesataBinId(e.target.value)}
-              >
-                <option value="">— Seleziona Bin Oleificio —</option>
-                {bins
-                  .filter((b) => {
-                    if (b.id === pesataBinId) return true;
-                    if (pesataModal?.weighing?.binId === b.id) return true;
-                    return b.status === "AVAILABLE";
-                  })
-                  .map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.identifier} (Capienza: {b.capacityKg} kg{b.status === "LOADED" ? " - Già caricato" : ""})
-                    </option>
-                  ))}
-              </select>
-              <span style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, display: "block" }}>
-                Questo bin aziendale verrà marcato come CARICATO fino alla molitura.
-              </span>
-            </div>
-          )}
-
-          {/* Dettaglio se Bin del Cliente */}
-          {pesataBinType === "cliente" && (
-            <div style={{ background: "rgba(217, 119, 6, 0.08)", border: "1px solid rgba(217, 119, 6, 0.25)", borderRadius: 8, padding: "10px 12px" }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: "#D97706", marginBottom: 4, display: "block" }}>
-                Sigla / Identificativo Bin del Cliente
-              </label>
-              <input
-                type="text"
-                placeholder="Es. Cassone Giallo #1, Bin Mario Rossi..."
-                value={pesataCustomerBinDesc}
-                onChange={(e) => setPesataCustomerBinDesc(e.target.value)}
-                style={{ background: "var(--background)" }}
-              />
-              <span style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4, display: "block" }}>
-                Verrà chiaramente segnalato per la restituzione al cliente al termine della lavorazione. Non occupa bins dell&apos;oleificio.
-              </span>
-            </div>
-          )}
-        </div>
-
-        <div className="form-group">
-          <label>Peso Netto Olive (kg) *</label>
+          <label>Peso totale olive (kg) — opzionale</label>
           <input
             type="number"
-            placeholder="Es. 350"
+            inputMode="decimal"
+            placeholder="Es. 1350 (lascia vuoto se non ancora pesato)"
             value={pesataKg}
-            onChange={e => setPesataKg(e.target.value)}
+            onChange={(e) => setPesataKg(e.target.value)}
             min={0.1}
             step={0.1}
             autoFocus
           />
+          <span style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2, display: "block" }}>
+            La pesata è unica per tutta la partita: inserisci il peso totale, non quello dei singoli bins.
+          </span>
         </div>
-        {pesataModal?.mode === "new" && pesataModal.batchId && (weighingsMap[pesataModal.batchId]?.length ?? 0) > 0 && (
-          <p style={{ fontSize: 12, color: "var(--text-muted)" }}>
-            Totale attuale: {weighingsMap[pesataModal.batchId].reduce((a, w) => a + w.weightKg, 0)} kg
-            ({weighingsMap[pesataModal.batchId].length} pesate)
+
+        <div className="form-group">
+          <label style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 8 }}>
+            <Box size={14} color="var(--accent)" />
+            Bins dell&apos;oleificio utilizzati ({pesataBinIds.length})
+          </label>
+          <div style={{ position: "relative", marginBottom: 8 }}>
+            <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+            <input
+              type="text"
+              placeholder="Cerca bin..."
+              value={binSearch}
+              onChange={(e) => setBinSearch(e.target.value)}
+              style={{ paddingLeft: 34 }}
+            />
+          </div>
+          <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {selectableBins.length === 0 ? (
+              <span style={{ fontSize: 12, color: "var(--text-muted)", padding: 6 }}>Nessun bin disponibile.</span>
+            ) : selectableBins.map((b) => {
+              const selected = pesataBinIds.includes(b.id!);
+              const pickedUp = b.status === "PICKED_UP" || b.status === "RESERVED";
+              return (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => toggleBin(b.id!)}
+                  className={selected ? "btn-primary" : "btn-secondary"}
+                  style={{ padding: "5px 10px", fontSize: 12, fontFamily: "monospace" }}
+                  title={pickedUp ? "Già ritirato dal cliente" : undefined}
+                >
+                  {b.identifier}{pickedUp && !selected ? " 🚜" : ""}
+                </button>
+              );
+            })}
+          </div>
+          <span style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4, display: "block" }}>
+            I bins selezionati risultano CARICHI fino alla molitura. 🚜 = bin già ritirato dal cliente prima della pesata.
+          </span>
+        </div>
+
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label>Bins propri del cliente (da restituire) — opzionale</label>
+          <input
+            type="text"
+            placeholder="Es. 3 cassoni gialli del cliente"
+            value={pesataCustomerBinDesc}
+            onChange={(e) => setPesataCustomerBinDesc(e.target.value)}
+          />
+        </div>
+
+        {pesataError && (
+          <p style={{ fontSize: 12, color: "var(--red-text)", backgroundColor: "var(--red-bg)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--red-border)", marginTop: 12 }}>
+            {pesataError}
           </p>
         )}
       </Modal>

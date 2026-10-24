@@ -10,6 +10,8 @@ import {
   orderBy,
   serverTimestamp,
   Timestamp,
+  onSnapshot,
+  type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import type { Appointment, AppointmentType, AppointmentStatus } from "../types";
@@ -58,12 +60,32 @@ export const getAppointmentsForDay = async (date: Date): Promise<Appointment[]> 
   return getAppointmentsByDateRange(start, end);
 };
 
+// Real-time: aggiorna automaticamente l'elenco ad ogni modifica
+export const subscribeAppointments = (
+  callback: (items: Appointment[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe => {
+  const q = query(collection(db, COL), orderBy("startDate", "asc"));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Appointment))),
+    (err) => {
+      console.error("Errore sottoscrizione agenda:", err);
+      onError?.(err);
+    }
+  );
+};
+
+// Firestore rifiuta i campi undefined
+const stripUndefined = <T extends object>(data: T): T =>
+  Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)) as T;
+
 // ─── CREAZIONE ─────────────────────────────────────────────────────────────────
 export const addAppointment = async (
   appointment: Omit<Appointment, "id" | "createdAt">
 ): Promise<string> => {
   const docRef = await addDoc(collection(db, COL), {
-    ...appointment,
+    ...stripUndefined(appointment),
     status: appointment.status ?? "scheduled",
     createdAt: serverTimestamp(),
   });
@@ -75,7 +97,7 @@ export const updateAppointment = async (
   id: string,
   data: Partial<Appointment>
 ) => {
-  await updateDoc(doc(db, COL, id), data);
+  await updateDoc(doc(db, COL, id), stripUndefined(data));
 };
 
 export const updateAppointmentStatus = async (

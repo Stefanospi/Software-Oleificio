@@ -1,8 +1,8 @@
 "use client";
 
-import { Plus, Box, CheckCircle, Clock, Truck, Loader2, Pencil, Trash2, Zap } from "lucide-react";
+import { Plus, Box, CheckCircle, Clock, Truck, Loader2, Pencil, Trash2, Zap, UserCheck } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
-import { getBins, addBin, getCustomers, updateBinStatus, deleteBin, deleteAllBins, createBatchBins } from "@/lib/db";
+import { subscribeBins, subscribeCustomers, addBin, updateBinStatus, deleteBin, deleteAllBins, createBatchBins } from "@/lib/db";
 import { Modal } from "@/components/Modal";
 import { useAuth } from "@/context/AuthContext";
 import type { Bin, BinStatus, Customer } from "@/types";
@@ -10,6 +10,7 @@ import type { Bin, BinStatus, Customer } from "@/types";
 const STATUS_CONFIG: Record<BinStatus, { label: string; badgeClass: string; icon: React.ElementType }> = {
   AVAILABLE: { label: "Libero", badgeClass: "badge-green", icon: CheckCircle },
   RESERVED:  { label: "Prenotato", badgeClass: "badge-yellow", icon: Clock },
+  PICKED_UP: { label: "Ritirato dal cliente", badgeClass: "badge-olive", icon: UserCheck },
   LOADED:    { label: "Carico", badgeClass: "badge-blue", icon: Truck },
 };
 
@@ -40,19 +41,14 @@ export default function BinsPage() {
   // Elimina conferma
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  useEffect(() => { fetchDati(); }, []);
-
-  const fetchDati = async () => {
-    try {
-      const [binsData, clientiData] = await Promise.all([getBins(), getCustomers()]);
-      setBins(binsData);
-      setClienti(clientiData);
-    } catch (e) {
-      console.error("Errore caricamento:", e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    const unsubBins = subscribeBins(
+      (data) => { setBins(data); setLoading(false); },
+      () => setLoading(false)
+    );
+    const unsubCustomers = subscribeCustomers(setClienti);
+    return () => { unsubBins(); unsubCustomers(); };
+  }, []);
 
   const handleGenerateBulk = async () => {
     const count = parseInt(bulkCount, 10);
@@ -62,7 +58,6 @@ export default function BinsPage() {
     try {
       await createBatchBins(count, capacity, bulkPrefix.trim() || "BIN-");
       setShowBulkModal(false);
-      await fetchDati();
     } catch (err) {
       console.error("Errore generazione batch bins:", err);
     } finally {
@@ -78,7 +73,6 @@ export default function BinsPage() {
     try {
       await deleteAllBins();
       setShowDeleteAll(false);
-      await fetchDati();
     } catch (err) {
       console.error("Errore eliminazione bins:", err);
     } finally {
@@ -96,7 +90,6 @@ export default function BinsPage() {
       setShowNew(false);
       setNewId("");
       setNewCapacity("");
-      await fetchDati();
     } finally { setSaving(false); }
   };
 
@@ -110,19 +103,19 @@ export default function BinsPage() {
     if (!editBin?.id) return;
     setSaving(true);
     try {
+      const hasCustomer = editStatus !== "AVAILABLE" && !!editCustomerId;
       await updateBinStatus(editBin.id, {
         status: editStatus,
-        customerId: editCustomerId || null
+        customerId: hasCustomer ? editCustomerId : null,
+        ...(editStatus === "AVAILABLE" ? { batchId: null } : {}),
       });
       setEditBin(null);
-      await fetchDati();
     } finally { setSaving(false); }
   };
 
   const handleDelete = async (id: string) => {
     await deleteBin(id);
     setDeleteConfirmId(null);
-    await fetchDati();
   };
 
   const sortedBins = useMemo(() => {
@@ -137,6 +130,7 @@ export default function BinsPage() {
   const grouped = {
     AVAILABLE: sortedBins.filter(b => b.status === "AVAILABLE"),
     RESERVED:  sortedBins.filter(b => b.status === "RESERVED"),
+    PICKED_UP: sortedBins.filter(b => b.status === "PICKED_UP"),
     LOADED:    sortedBins.filter(b => b.status === "LOADED"),
   };
 
@@ -179,18 +173,18 @@ export default function BinsPage() {
       </div>
 
       {/* Contatori */}
-      <div className="responsive-grid-3" style={{ marginBottom: 28 }}>
-        {(["AVAILABLE", "RESERVED", "LOADED"] as BinStatus[]).map(s => {
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 16, marginBottom: 28 }}>
+        {(["AVAILABLE", "RESERVED", "PICKED_UP", "LOADED"] as BinStatus[]).map(s => {
           const cfg = STATUS_CONFIG[s];
           const Icon = cfg.icon;
           return (
             <div key={s} className="card" style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10,
-                backgroundColor: s === "AVAILABLE" ? "var(--green-bg)" : s === "RESERVED" ? "var(--yellow-bg)" : "var(--blue-bg)",
+                backgroundColor: s === "AVAILABLE" ? "var(--green-bg)" : s === "RESERVED" || s === "PICKED_UP" ? "var(--yellow-bg)" : "var(--blue-bg)",
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <Icon size={18} color={s === "AVAILABLE" ? "var(--green-text)" : s === "RESERVED" ? "var(--yellow-text)" : "var(--blue-text)"} />
+                <Icon size={18} color={s === "AVAILABLE" ? "var(--green-text)" : s === "RESERVED" || s === "PICKED_UP" ? "var(--yellow-text)" : "var(--blue-text)"} />
               </div>
               <div>
                 <div style={{ fontSize: 22, fontWeight: 700, color: "var(--text-primary)" }}>{grouped[s].length}</div>
@@ -332,6 +326,7 @@ export default function BinsPage() {
           <select value={editStatus} onChange={e => setEditStatus(e.target.value as BinStatus)}>
             <option value="AVAILABLE">✅ Libero</option>
             <option value="RESERVED">🕐 Prenotato</option>
+            <option value="PICKED_UP">🚜 Ritirato dal cliente (prima della pesata)</option>
             <option value="LOADED">🚛 Carico</option>
           </select>
         </div>
@@ -344,7 +339,7 @@ export default function BinsPage() {
             ))}
           </select>
         </div>
-        {editStatus === "AVAILABLE" && editCustomerId && (
+        {editStatus === "AVAILABLE" && editBin?.customerId && (
           <p style={{ fontSize: 12, color: "var(--yellow-text)", backgroundColor: "var(--yellow-bg)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--yellow-border)" }}>
             ⚠️ Impostare lo stato su &quot;Libero&quot; rimuoverà l&apos;associazione al cliente.
           </p>
