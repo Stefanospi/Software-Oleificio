@@ -23,6 +23,7 @@ import {
 } from "@/lib/agendaService";
 import { subscribeCustomers } from "@/lib/db";
 import { useAuth } from "@/context/AuthContext";
+import { CustomerSelect } from "@/components/CustomerSelect";
 import type { Appointment, AppointmentStatus, AppointmentType, Customer } from "@/types";
 import { Timestamp } from "firebase/firestore";
 
@@ -519,27 +520,7 @@ export default function AgendaPage() {
                   <label style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", display: "block", marginBottom: 6 }}>
                     Cliente *
                   </label>
-                  <select
-                    value={formCustomerId}
-                    onChange={(e) => setFormCustomerId(e.target.value)}
-                    required
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid var(--border)",
-                      background: "var(--bg-app)",
-                      color: "var(--text-primary)",
-                      fontSize: 14,
-                    }}
-                  >
-                    <option value="">Seleziona un cliente...</option>
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.firstName} {c.lastName} {c.companyName ? `(${c.companyName})` : ""}
-                      </option>
-                    ))}
-                  </select>
+                  <CustomerSelect customers={customers} value={formCustomerId} onChange={setFormCustomerId} />
                 </div>
 
                 {/* Tipo e Orario */}
@@ -653,7 +634,7 @@ export default function AgendaPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={saving}
+                    disabled={saving || !formCustomerId}
                     style={{
                       padding: "10px 20px",
                       borderRadius: 8,

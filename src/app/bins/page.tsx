@@ -1,9 +1,10 @@
 "use client";
 
-import { Plus, Box, CheckCircle, Clock, Truck, Loader2, Pencil, Trash2, Zap, UserCheck } from "lucide-react";
+import { Plus, Box, CheckCircle, Clock, Truck, Loader2, Pencil, Trash2, Zap, UserCheck, Search } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { subscribeBins, subscribeCustomers, addBin, updateBinStatus, deleteBin, deleteAllBins, createBatchBins } from "@/lib/db";
 import { Modal } from "@/components/Modal";
+import { CustomerSelect } from "@/components/CustomerSelect";
 import { useAuth } from "@/context/AuthContext";
 import type { Bin, BinStatus, Customer } from "@/types";
 
@@ -37,6 +38,10 @@ export default function BinsPage() {
   const [editBin, setEditBin] = useState<Bin | null>(null);
   const [editStatus, setEditStatus] = useState<BinStatus>("AVAILABLE");
   const [editCustomerId, setEditCustomerId] = useState("");
+
+  // Ricerca e filtro
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<BinStatus | "ALL">("ALL");
 
   // Elimina conferma
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -93,9 +98,9 @@ export default function BinsPage() {
     } finally { setSaving(false); }
   };
 
-  const openEdit = (bin: Bin) => {
+  const openEdit = (bin: Bin, presetStatus?: BinStatus) => {
     setEditBin(bin);
-    setEditStatus(bin.status);
+    setEditStatus(presetStatus ?? bin.status);
     setEditCustomerId(bin.customerId || "");
   };
 
@@ -113,6 +118,10 @@ export default function BinsPage() {
     } finally { setSaving(false); }
   };
 
+  const handleFree = async (id: string) => {
+    await updateBinStatus(id, { status: "AVAILABLE", customerId: null, batchId: null });
+  };
+
   const handleDelete = async (id: string) => {
     await deleteBin(id);
     setDeleteConfirmId(null);
@@ -126,6 +135,16 @@ export default function BinsPage() {
       })
     );
   }, [bins]);
+
+  const visibleBins = useMemo(() => {
+    const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+    const names = new Map(clienti.map((c) => [c.id, `${c.firstName} ${c.lastName} ${c.companyName ?? ""}`.toLowerCase()]));
+    return sortedBins.filter((b) => {
+      if (statusFilter !== "ALL" && b.status !== statusFilter) return false;
+      const hay = `${(b.identifier || "").toLowerCase()} ${b.customerId ? names.get(b.customerId) ?? "" : ""}`;
+      return words.every((w) => hay.includes(w));
+    });
+  }, [sortedBins, search, statusFilter, clienti]);
 
   const grouped = {
     AVAILABLE: sortedBins.filter(b => b.status === "AVAILABLE"),
@@ -178,7 +197,13 @@ export default function BinsPage() {
           const cfg = STATUS_CONFIG[s];
           const Icon = cfg.icon;
           return (
-            <div key={s} className="card" style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+            <div
+              key={s}
+              className="card"
+              onClick={() => setStatusFilter(statusFilter === s ? "ALL" : s)}
+              title="Clicca per filtrare l'elenco"
+              style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer", outline: statusFilter === s ? "2px solid var(--accent)" : "none" }}
+            >
               <div style={{
                 width: 40, height: 40, borderRadius: 10,
                 backgroundColor: s === "AVAILABLE" ? "var(--green-bg)" : s === "RESERVED" || s === "PICKED_UP" ? "var(--yellow-bg)" : "var(--blue-bg)",
@@ -193,6 +218,18 @@ export default function BinsPage() {
             </div>
           );
         })}
+      </div>
+
+      {/* Ricerca */}
+      <div style={{ position: "relative", marginBottom: 16 }}>
+        <Search size={16} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+        <input
+          type="text"
+          placeholder="Cerca per numero bin o nome cliente..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ paddingLeft: 42 }}
+        />
       </div>
 
       {/* Lista bins */}
@@ -218,7 +255,10 @@ export default function BinsPage() {
               </tr>
             </thead>
             <tbody>
-              {sortedBins.map(bin => {
+              {visibleBins.length === 0 && (
+                <tr><td colSpan={5} style={{ textAlign: "center", padding: "32px 16px", color: "var(--text-muted)" }}>Nessun bin trovato con questi filtri.</td></tr>
+              )}
+              {visibleBins.map(bin => {
                 const cfg = STATUS_CONFIG[bin.status];
                 const Icon = cfg.icon;
                 const cliente = clienti.find(c => c.id === bin.customerId);
@@ -255,6 +295,15 @@ export default function BinsPage() {
                     </td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                        {bin.status === "AVAILABLE" ? (
+                          <button className="btn-secondary" onClick={() => openEdit(bin, "PICKED_UP")} style={{ padding: "6px 12px", fontSize: 12 }} title="Il cliente ritira questo bin prima della pesata">
+                            <UserCheck size={13} /> Ritira
+                          </button>
+                        ) : (
+                          <button className="btn-secondary" onClick={() => handleFree(bin.id!)} style={{ padding: "6px 12px", fontSize: 12 }} title="Rimetti il bin tra quelli liberi">
+                            <CheckCircle size={13} /> Libera
+                          </button>
+                        )}
                         <button className="btn-ghost" onClick={() => openEdit(bin)} style={{ padding: "6px 12px" }}>
                           <Pencil size={13} /> Modifica
                         </button>
@@ -332,12 +381,7 @@ export default function BinsPage() {
         </div>
         <div className="form-group">
           <label>Assegna a Cliente</label>
-          <select value={editCustomerId} onChange={e => setEditCustomerId(e.target.value)}>
-            <option value="">— Nessuno —</option>
-            {clienti.map(c => (
-              <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>
-            ))}
-          </select>
+          <CustomerSelect customers={clienti} value={editCustomerId} onChange={setEditCustomerId} allowEmpty placeholder="Cerca cliente (lascia vuoto per nessuno)..." />
         </div>
         {editStatus === "AVAILABLE" && editBin?.customerId && (
           <p style={{ fontSize: 12, color: "var(--yellow-text)", backgroundColor: "var(--yellow-bg)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--yellow-border)" }}>

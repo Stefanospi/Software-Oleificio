@@ -2,10 +2,11 @@
 
 import { Users, Box, ClipboardList, Droplets, Loader2, TrendingUp, ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { subscribeCustomers, subscribeBins, subscribeBatches, subscribeContainers } from "@/lib/db";
+import { useEffect, useMemo, useState } from "react";
+import { subscribeCustomers, subscribeBins, subscribeBatches, subscribeContainers, subscribeWeighings } from "@/lib/db";
+import { subscribeAppointments } from "@/lib/agendaService";
 import { useAuth } from "@/context/AuthContext";
-import type { Customer, Bin, Batch, Container } from "@/types";
+import type { Customer, Bin, Batch, Container, Weighing, Appointment } from "@/types";
 
 export default function Home() {
   const { loading: authLoading, user, profile } = useAuth();
@@ -17,6 +18,10 @@ export default function Home() {
     olioProdotto: 0
   });
   const [loading, setLoading] = useState(true);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [batches, setBatches] = useState<Batch[]>([]);
+  const [weighings, setWeighings] = useState<Weighing[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
 
   useEffect(() => {
     // Attende utente e profilo prima di aprire le sottoscrizioni Firestore
@@ -39,13 +44,44 @@ export default function Home() {
     const onError = () => setLoading(false);
 
     const unsubs = [
-      subscribeCustomers((v) => { data.clienti = v; recompute(); }, onError),
+      subscribeCustomers((v) => { data.clienti = v; setCustomers(v); recompute(); }, onError),
       subscribeBins((v) => { data.bins = v; recompute(); }, onError),
-      subscribeBatches((v) => { data.partite = v; recompute(); }, onError),
+      subscribeBatches((v) => { data.partite = v; setBatches(v); recompute(); }, onError),
+      subscribeWeighings(setWeighings),
+      subscribeAppointments(setAppointments),
       subscribeContainers((v) => { data.contenitori = v; recompute(); }, onError),
     ];
     return () => unsubs.forEach((u) => u());
   }, [authLoading, user, profile]);
+
+  const openBatches = useMemo(() => {
+    const names = new Map(customers.map((c) => [c.id, `${c.firstName} ${c.lastName}`]));
+    const kgByBatch = new Map<string, { kg: number; bins: Set<string> }>();
+    weighings.forEach((w) => {
+      const e = kgByBatch.get(w.batchId) ?? { kg: 0, bins: new Set<string>() };
+      e.kg += w.weightKg ?? 0;
+      (w.binIds ?? (w.binId ? [w.binId] : [])).forEach((b) => e.bins.add(b));
+      kgByBatch.set(w.batchId, e);
+    });
+    return batches
+      .filter((b) => b.status === "OPEN")
+      .map((b) => ({
+        id: b.id!,
+        name: names.get(b.customerId) ?? "Cliente sconosciuto",
+        kg: kgByBatch.get(b.id!)?.kg ?? 0,
+        bins: kgByBatch.get(b.id!)?.bins.size ?? 0,
+      }));
+  }, [customers, batches, weighings]);
+
+  const todayAppointments = useMemo(() => {
+    const now = new Date();
+    return appointments
+      .filter((a) => {
+        const d = a.startDate?.toDate?.();
+        return d && d.toDateString() === now.toDateString() && a.status !== "completed" && a.status !== "cancelled";
+      })
+      .slice(0, 8);
+  }, [appointments]);
 
   const statCards = [
     {
@@ -166,6 +202,54 @@ export default function Home() {
             })}
           </div>
 
+          {/* Operativo in tempo reale */}
+          <div className="responsive-grid-2" style={{ marginBottom: 28 }}>
+            <div className="card" style={{ padding: 20 }}>
+              <h2 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 12 }}>
+                Partite in lavorazione ({openBatches.length})
+              </h2>
+              {openBatches.length === 0 ? (
+                <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Nessuna partita aperta.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {openBatches.slice(0, 10).map((b) => (
+                    <Link key={b.id} href="/partite" style={{ textDecoration: "none" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "9px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", backgroundColor: "var(--surface)", fontSize: 13 }}>
+                        <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{b.name}</span>
+                        <span style={{ color: "var(--text-muted)" }}>
+                          {b.kg > 0 ? `${b.kg.toLocaleString("it-IT")} kg` : "peso n/d"} · {b.bins} bins
+                        </span>
+                      </div>
+                    </Link>
+                  ))}
+                  {openBatches.length > 10 && (
+                    <Link href="/partite" style={{ fontSize: 12, color: "var(--accent)" }}>Vedi tutte ({openBatches.length})</Link>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="card" style={{ padding: 20 }}>
+              <h2 style={{ fontSize: 15, fontWeight: 700, color: "var(--text-primary)", marginBottom: 12 }}>
+                Appuntamenti di oggi ({todayAppointments.length})
+              </h2>
+              {todayAppointments.length === 0 ? (
+                <p style={{ fontSize: 13, color: "var(--text-muted)" }}>Nessun appuntamento in programma oggi.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {todayAppointments.map((a) => (
+                    <Link key={a.id} href="/agenda" style={{ textDecoration: "none" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, padding: "9px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)", backgroundColor: "var(--surface)", fontSize: 13 }}>
+                        <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{a.customerName ?? a.title}</span>
+                        <span style={{ color: "var(--text-muted)" }}>
+                          {a.startDate.toDate().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
           {/* Quick links */}
           <div className="card" style={{ padding: 24 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 18 }}>
@@ -176,9 +260,9 @@ export default function Home() {
             </div>
             <div className="responsive-grid-4">
               {[
-                { label: "➕ Nuovo Cliente", href: "/clienti" },
+                { label: "➕ Nuovo Cliente", href: "/clienti?nuovo=1" },
                 { label: "📦 Gestisci Bins", href: "/bins" },
-                { label: "⚖️ Nuova Partita", href: "/partite" },
+                { label: "⚖️ Nuova Partita", href: "/partite?nuova=1" },
                 { label: "🛢️ Vedi Contenitori", href: "/contenitori" },
               ].map((q) => (
                 <Link key={q.href} href={q.href} style={{ textDecoration: "none" }}>

@@ -4,9 +4,11 @@ import {
   Plus, User, Loader2, Search, Pencil, Trash2,
   Phone, Mail, Hash, FileText, Filter, ChevronDown, Building2,
   MapPin, Cake, CheckCircle2, Clock, AlertCircle, Droplets,
-  Scale, Gauge, Layers, Award,
+  Scale, Gauge, Layers, Award, ClipboardList,
 } from "lucide-react";
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo, Fragment, Suspense } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { subscribeCustomers, addCustomer, updateCustomer, deleteCustomer } from "@/lib/db";
 import { Modal } from "@/components/Modal";
 import { useAuth } from "@/context/AuthContext";
@@ -33,14 +35,24 @@ const DECL_STATUS_CONFIG: Record<DeclarationStatus, { label: string; badgeClass:
 };
 
 export default function ClientiPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClientiContent />
+    </Suspense>
+  );
+}
+
+function ClientiContent() {
   const { isAdmin, user, profile } = useAuth();
+  const searchParams = useSearchParams();
   const [clienti, setClienti] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterDecl, setFilterDecl] = useState<DeclarationStatus | "all">("all");
   const [generatingPdf, setGeneratingPdf] = useState<string | null>(null);
 
-  const [modalOpen, setModalOpen] = useState(false);
+  // Deep link /clienti?nuovo=1 apre direttamente il form di registrazione
+  const [modalOpen, setModalOpen] = useState(searchParams.get("nuovo") === "1");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
@@ -351,6 +363,16 @@ export default function ClientiPage() {
                           </td>
                           <td onClick={(e) => e.stopPropagation()}>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, flexWrap: "wrap" }}>
+                              {/* Avvia subito una partita per questo cliente */}
+                              <Link
+                                href={`/partite?nuova=1&cliente=${cliente.id}`}
+                                className="btn-primary"
+                                style={{ padding: "6px 12px", fontSize: 12, textDecoration: "none" }}
+                                title="Crea una nuova partita per questo cliente"
+                              >
+                                <ClipboardList size={13} />
+                                Nuova Partita
+                              </Link>
                               {/* Scheda Macine per Cliente */}
                               <button
                                 className="btn-ghost"

@@ -1,16 +1,18 @@
 "use client";
 
 import { Plus, Scale, Droplet, Loader2, Trash2, ChevronDown, ChevronUp, AlertTriangle, Pencil, UserRound, Box, X, Search } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { deleteField } from "firebase/firestore";
 import {
-  addBatch, updateBatch, deleteBatch,
+  addBatch, updateBatch, deleteBatch, addCustomer,
   subscribeBatches, subscribeCustomers, subscribeBins, subscribeWeighings, subscribeMillings,
   addWeighing, updateWeighing, deleteWeighing,
   addMilling, updateBatchStatus,
   updateBinStatus,
 } from "@/lib/db";
 import { Modal } from "@/components/Modal";
+import { CustomerSelect } from "@/components/CustomerSelect";
 import { useAuth } from "@/context/AuthContext";
 import { addNotification, buildNotification } from "@/lib/notificationService";
 import type { Batch, Customer, Weighing, Milling, Bin } from "@/types";
@@ -56,7 +58,18 @@ const buildBatchWeighing = (list: Weighing[]): BatchWeighing => {
 const EMPTY_BATCH_WEIGHING = buildBatchWeighing([]);
 
 export default function PartitePage() {
+  return (
+    <Suspense fallback={null}>
+      <PartiteContent />
+    </Suspense>
+  );
+}
+
+type StatusFilter = "OPEN" | "CLOSED" | "ALL";
+
+function PartiteContent() {
   const { loading: authLoading, user, profile, isAdmin } = useAuth();
+  const searchParams = useSearchParams();
   const [partite, setPartite] = useState<Batch[]>([]);
   const [clienti, setClienti] = useState<Customer[]>([]);
   const [bins, setBins] = useState<Bin[]>([]);
@@ -66,8 +79,18 @@ export default function PartitePage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // ── Modal nuova partita ──
-  const [showNuovaPartita, setShowNuovaPartita] = useState(false);
-  const [newClienteId, setNewClienteId] = useState("");
+  // Deep link: /partite?nuova=1&cliente=<id> apre subito la creazione (usato da Dashboard e Clienti)
+  const [showNuovaPartita, setShowNuovaPartita] = useState(searchParams.get("nuova") === "1");
+  const [newClienteId, setNewClienteId] = useState(searchParams.get("cliente") ?? "");
+  const [showQuickCustomer, setShowQuickCustomer] = useState(false);
+  const [quickFirst, setQuickFirst] = useState("");
+  const [quickLast, setQuickLast] = useState("");
+  const [quickPhone, setQuickPhone] = useState("");
+  const [quickError, setQuickError] = useState<string | null>(null);
+
+  // ── Filtri elenco ──
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("OPEN");
+  const [listSearch, setListSearch] = useState("");
   const [savingPartita, setSavingPartita] = useState(false);
 
   // ── Modal modifica partita ──
@@ -140,6 +163,17 @@ export default function PartitePage() {
     return m;
   }, [allMillings]);
 
+  const visiblePartite = useMemo(() => {
+    const words = listSearch.toLowerCase().split(/\s+/).filter(Boolean);
+    return partite.filter((p) => {
+      if (statusFilter !== "ALL" && p.status !== statusFilter) return false;
+      if (words.length === 0) return true;
+      const c = clientiMap[p.customerId];
+      const hay = `${c?.firstName ?? ""} ${c?.lastName ?? ""} ${c?.companyName ?? ""} ${c?.phone ?? ""}`.toLowerCase();
+      return words.every((w) => hay.includes(w));
+    });
+  }, [partite, statusFilter, listSearch, clientiMap]);
+
   const getBW = (batchId?: string) => (batchId && weighingByBatch[batchId]) || EMPTY_BATCH_WEIGHING;
 
   const releaseBins = (ids: string[]) =>
@@ -160,8 +194,48 @@ export default function PartitePage() {
       })).catch(() => {});
       setShowNuovaPartita(false);
       setNewClienteId("");
+      // Flusso rapido: apre la partita e propone subito la registrazione di pesata e bins
+      setStatusFilter("OPEN");
+      setListSearch("");
+      setExpandedId(batchId);
+      openPesata(batchId);
     } finally { setSavingPartita(false); }
   };
+
+  // ── CLIENTE: creazione rapida direttamente dalla nuova partita ──
+  const handleQuickCustomer = async () => {
+    if (!quickFirst.trim() || !quickLast.trim()) {
+      setQuickError("Nome e cognome sono obbligatori.");
+      return;
+    }
+    setQuickError(null);
+    setSavingPartita(true);
+    try {
+      const phone = quickPhone.trim();
+      const id = await addCustomer({
+        firstName: quickFirst.trim(),
+        lastName: quickLast.trim(),
+        ...(phone ? { phone } : {}),
+        declarationStatus: "pending",
+        totalMillings: 0,
+        totalOlivesKg: 0,
+      } as Omit<Customer, "id">);
+      addNotification(buildNotification("new_customer", user?.uid || "system", profile?.displayName || user?.email || "Dipendente", {
+        customerId: id,
+        customerName: `${quickFirst} ${quickLast}`.trim(),
+      })).catch(() => {});
+      setNewClienteId(id);
+      setShowQuickCustomer(false);
+      setQuickFirst(""); setQuickLast(""); setQuickPhone("");
+    } catch (err) {
+      console.error("Errore creazione cliente rapido:", err);
+      setQuickError("Errore durante il salvataggio del cliente.");
+    } finally { setSavingPartita(false); }
+  };
+
+  const openPartiteOfNewCustomer = newClienteId
+    ? partite.filter((p) => p.status === "OPEN" && p.customerId === newClienteId)
+    : [];
 
   // ── PARTITA: Modifica ──
   const openEditPartita = (p: Batch) => {
@@ -397,22 +471,55 @@ export default function PartitePage() {
             {partite.filter(p => p.status === "OPEN").length} aperte · {partite.filter(p => p.status === "CLOSED").length} chiuse
           </p>
         </div>
-        <button className="btn-primary" onClick={() => setShowNuovaPartita(true)}>
-          <Plus size={17} /> Nuova Partita
+        <button className="btn-primary" onClick={() => setShowNuovaPartita(true)} style={{ padding: "12px 20px", fontSize: 15 }}>
+          <Plus size={18} /> Nuova Partita
         </button>
+      </div>
+
+      {/* Ricerca e filtri */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 220 }}>
+          <Search size={16} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+          <input
+            type="text"
+            placeholder="Cerca partita per cliente..."
+            value={listSearch}
+            onChange={(e) => setListSearch(e.target.value)}
+            style={{ paddingLeft: 42 }}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {([
+            ["OPEN", `Aperte (${partite.filter(p => p.status === "OPEN").length})`],
+            ["CLOSED", `Chiuse (${partite.filter(p => p.status === "CLOSED").length})`],
+            ["ALL", "Tutte"],
+          ] as [StatusFilter, string][]).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              className={statusFilter === key ? "btn-primary" : "btn-secondary"}
+              style={{ padding: "8px 14px", fontSize: 13 }}
+              onClick={() => setStatusFilter(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading ? (
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: 200 }}>
           <Loader2 size={26} style={{ animation: "spin 1s linear infinite", color: "var(--accent)" }} />
         </div>
-      ) : partite.length === 0 ? (
+      ) : visiblePartite.length === 0 ? (
         <div className="card" style={{ padding: 48, textAlign: "center", color: "var(--text-muted)" }}>
-          Nessuna partita registrata. Clicca su &quot;Nuova Partita&quot; per iniziare.
+          {partite.length === 0
+            ? "Nessuna partita registrata. Clicca su \"Nuova Partita\" per iniziare."
+            : "Nessuna partita trovata con questi filtri."}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {partite.map(partita => {
+          {visiblePartite.map(partita => {
             const cliente = partita.customerId ? clientiMap[partita.customerId] : null;
             const nomeCliente = cliente ? `${cliente.firstName} ${cliente.lastName}` : "Cliente Sconosciuto";
             const bw = getBW(partita.id);
@@ -632,7 +739,7 @@ export default function PartitePage() {
         footer={
           <>
             <button className="btn-secondary" onClick={() => setShowNuovaPartita(false)}>Annulla</button>
-            <button className="btn-primary" onClick={handleCreatePartita} disabled={savingPartita || !newClienteId}>
+            <button className="btn-primary" onClick={handleCreatePartita} disabled={savingPartita || !newClienteId || showQuickCustomer}>
               {savingPartita && <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} />}
               Crea Partita
             </button>
@@ -641,11 +748,55 @@ export default function PartitePage() {
       >
         <div className="form-group">
           <label>Seleziona Cliente *</label>
-          <select value={newClienteId} onChange={e => setNewClienteId(e.target.value)} autoFocus>
-            <option value="">— Seleziona un cliente —</option>
-            {clienti.map(c => <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>)}
-          </select>
+          <CustomerSelect customers={clienti} value={newClienteId} onChange={setNewClienteId} autoFocus />
         </div>
+        {openPartiteOfNewCustomer.length > 0 && (
+          <div style={{ fontSize: 12, color: "var(--yellow-text)", backgroundColor: "var(--yellow-bg)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--yellow-border)", marginBottom: 10, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+            <span>⚠️ Questo cliente ha già una partita aperta.</span>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ padding: "4px 10px", fontSize: 12 }}
+              onClick={() => {
+                setStatusFilter("OPEN");
+                setListSearch("");
+                setExpandedId(openPartiteOfNewCustomer[0].id!);
+                setShowNuovaPartita(false);
+                setNewClienteId("");
+              }}
+            >
+              Apri quella esistente
+            </button>
+          </div>
+        )}
+        {!showQuickCustomer ? (
+          <button type="button" className="btn-ghost" style={{ padding: "6px 10px", fontSize: 13 }} onClick={() => setShowQuickCustomer(true)}>
+            <Plus size={14} /> Cliente nuovo? Registralo qui
+          </button>
+        ) : (
+          <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase" }}>Nuovo cliente (solo nome e cognome obbligatori)</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <input type="text" placeholder="Nome *" value={quickFirst} onChange={(e) => setQuickFirst(e.target.value)} autoFocus />
+              <input type="text" placeholder="Cognome *" value={quickLast} onChange={(e) => setQuickLast(e.target.value)} />
+            </div>
+            <input
+              type="tel"
+              placeholder="Telefono (opzionale)"
+              value={quickPhone}
+              onChange={(e) => setQuickPhone(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleQuickCustomer(); }}
+            />
+            {quickError && <span style={{ fontSize: 12, color: "var(--red-text)" }}>{quickError}</span>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn-secondary" style={{ padding: "6px 12px", fontSize: 13 }} onClick={() => { setShowQuickCustomer(false); setQuickError(null); }}>Annulla</button>
+              <button type="button" className="btn-primary" style={{ padding: "6px 12px", fontSize: 13 }} onClick={handleQuickCustomer} disabled={savingPartita}>
+                {savingPartita && <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} />}
+                Salva cliente
+              </button>
+            </div>
+          </div>
+        )}
         {clienti.length === 0 && (
           <p style={{ fontSize: 12, color: "var(--yellow-text)", backgroundColor: "var(--yellow-bg)", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--yellow-border)", marginTop: 8 }}>
             ⚠️ Nessun cliente registrato. Aggiungi prima un cliente dalla sezione Clienti.
@@ -667,10 +818,7 @@ export default function PartitePage() {
       >
         <div className="form-group">
           <label>Cliente assegnato</label>
-          <select value={editClienteId} onChange={e => setEditClienteId(e.target.value)} autoFocus>
-            <option value="">— Seleziona un cliente —</option>
-            {clienti.map(c => <option key={c.id} value={c.id}>{c.firstName} {c.lastName}</option>)}
-          </select>
+          <CustomerSelect customers={clienti} value={editClienteId} onChange={setEditClienteId} autoFocus />
         </div>
       </Modal>
 
@@ -698,6 +846,7 @@ export default function PartitePage() {
             placeholder="Es. 1350 (lascia vuoto se non ancora pesato)"
             value={pesataKg}
             onChange={(e) => setPesataKg(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSavePesata(); }}
             min={0.1}
             step={0.1}
             autoFocus
@@ -716,9 +865,19 @@ export default function PartitePage() {
             <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
             <input
               type="text"
-              placeholder="Cerca bin..."
+              placeholder="Cerca bin e premi Invio per aggiungerlo (es. 45)..."
               value={binSearch}
               onChange={(e) => setBinSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                const q = binSearch.trim();
+                if (!q) return;
+                // Invio aggiunge il bin con quel numero esatto (o l'unico risultato)
+                const exact = selectableBins.find((b) => /^\d+$/.test(q) && b.identifier.replace(/\D/g, "") !== "" && parseInt(b.identifier.replace(/\D/g, ""), 10) === parseInt(q, 10));
+                const target = exact ?? (selectableBins.length === 1 ? selectableBins[0] : undefined);
+                if (target?.id) { toggleBin(target.id); setBinSearch(""); }
+              }}
               style={{ paddingLeft: 34 }}
             />
           </div>
@@ -751,6 +910,7 @@ export default function PartitePage() {
           <label>Bins propri del cliente (da restituire) — opzionale</label>
           <input
             type="text"
+            onKeyDown={(e) => { if (e.key === "Enter") handleSavePesata(); }}
             placeholder="Es. 3 cassoni gialli del cliente"
             value={pesataCustomerBinDesc}
             onChange={(e) => setPesataCustomerBinDesc(e.target.value)}
